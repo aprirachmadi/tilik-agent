@@ -1,0 +1,23 @@
+services:
+  qdrant:
+    image: qdrant/qdrant:latest
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_storage:/qdrant/storage
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: tilik
+      POSTGRES_PASSWORD: tilik
+      POSTGRES_DB: tilik
+    volumes:
+      - pgvector_storage:/var/lib/postgresql/data
+
+volumes:
+  qdrant_storage:
+  pgvector_storage:
