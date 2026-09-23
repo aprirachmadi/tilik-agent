@@ -1,0 +1,1 @@
+"""BPS statistical table ingestion."""
