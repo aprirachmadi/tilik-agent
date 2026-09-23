@@ -8,7 +8,8 @@ requires-python = ">=3.11,<3.14"
 dynamic = ["dependencies"]
 
 [tool.poetry]
-package-mode = false
+package-mode = true
+packages = [{include = "tilik_agent", from = "src"}]
 
 [tool.poetry.dependencies]
 python = ">=3.11,<3.14"
@@ -70,6 +71,9 @@ structlog = "^24.4"
 # Observability and offline eval (Langfuse: traces, datasets, experiments; DeepEval: metrics / LLM-judge)
 langfuse = "^4.15"
 deepeval = "^4.2"
+xlrd = "^2.0.2"
+openpyxl = "^3.1.5"
+alembic = "^1.20.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3"
@@ -82,7 +86,7 @@ pandas-stubs = "^2.2"
 ipykernel = "^7.3.0"
 
 [tool.poetry.scripts]
-# tilik = "tilik_agent.cli:app"  # uncomment when src/tilik_agent exists
+tilik = "tilik_agent.cli:app"
 
 [build-system]
 requires = ["poetry-core"]
