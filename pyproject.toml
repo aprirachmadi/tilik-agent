@@ -4,14 +4,14 @@ version = "0.1.0"
 description = "AI agents for querying and reasoning over BPS statistical data"
 authors = [{ name = "Tilik Agent Contributors" }]
 license = "LicenseRef-Proprietary"
-requires-python = ">=3.11,<4.0"
+requires-python = ">=3.11,<3.14"
 dynamic = ["dependencies"]
 
 [tool.poetry]
 package-mode = false
 
 [tool.poetry.dependencies]
-python = "^3.11"
+python = ">=3.11,<3.14"
 
 # Configuration and validation
 pydantic = "^2.10"
@@ -45,9 +45,18 @@ numpy = "^2.2"
 pyarrow = "^19.0"
 sqlalchemy = "^2.0"
 
-# Optional RAG over docs / table metadata (enable when you add embeddings)
-# chromadb = "^0.6"
-# langchain-chroma = "^0.2"
+# RAG over BPS publications and docs (Qdrant server run separately, e.g. Docker on :6333)
+# Docling: PDF → markdown/layout (pip-only; also pulled by pdfmux[tables])
+docling = "^2.87"
+pdfmux = { version = "^1.8", extras = ["ocr", "tables"] }
+langchain-pdfmux = "^0.2"
+langchain-text-splitters = "^0.3"
+langchain-huggingface = { version = "^0.3", extras = ["full"] }
+sentence-transformers = "^3.0"
+qdrant-client = "^1.15"
+langchain-qdrant = "^0.2"
+langchain-postgres = "^0.0.16"
+psycopg = { version = "^3.2", extras = ["binary"] }
 
 # API / service surface for the agent
 fastapi = "^0.115"
@@ -58,6 +67,10 @@ typer = "^0.15"
 rich = "^13.9"
 structlog = "^24.4"
 
+# Observability and offline eval (Langfuse: traces, datasets, experiments; DeepEval: metrics / LLM-judge)
+langfuse = "^4.15"
+deepeval = "^4.2"
+
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3"
 pytest-asyncio = "^0.25"
@@ -66,6 +79,7 @@ ruff = "^0.9"
 mypy = "^1.14"
 types-requests = "^2.32"
 pandas-stubs = "^2.2"
+ipykernel = "^7.3.0"
 
 [tool.poetry.scripts]
 # tilik = "tilik_agent.cli:app"  # uncomment when src/tilik_agent exists
