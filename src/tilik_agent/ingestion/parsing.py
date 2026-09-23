@@ -179,9 +179,7 @@ def format_excel_number(number: float) -> str:
 
 def observation_fingerprint(draft: ObservationDraft) -> str:
     """Hash the fields that make a re-load a no-op when the source cell is unchanged."""
-    dimension_text = "|".join(
-        f"{item.source_code}={item.member_source_code}" for item in draft.dimensions
-    )
+    dimension_text = "|".join(f"{item.source_code}={item.member_source_code}" for item in draft.dimensions)
     payload = "\n".join(
         [
             draft.measure_source_code,
@@ -199,13 +197,17 @@ def observation_fingerprint(draft: ObservationDraft) -> str:
 
 
 def duplicate_reason(observations: list[ObservationDraft]) -> str | None:
-    """Reject a second mapping of the same source cell or dimension coordinate."""
+    """Reject a second mapping of the same source cell or dimension coordinate, or a cell on one axis twice."""
     cells: set[str] = set()
     coordinates: set[tuple[str, str, tuple[tuple[str, str], ...]]] = set()
     for draft in observations:
         if draft.source_cell_key in cells:
             return f"Duplicate source cell {draft.source_cell_key}"
         cells.add(draft.source_cell_key)
+        axes = [item.source_code for item in draft.dimensions]
+        if len(axes) != len(set(axes)):
+            repeated = next(axis for axis in axes if axes.count(axis) > 1)
+            return f"Source cell {draft.source_cell_key} has two members on dimension {repeated}"
         coordinate = (
             draft.measure_source_code,
             draft.period_label,

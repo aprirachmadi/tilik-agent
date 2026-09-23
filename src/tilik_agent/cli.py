@@ -75,7 +75,8 @@ def _load(*, table_id: str | None) -> IngestReport:
 def _echo_report(report: IngestReport) -> None:
     typer.echo(
         f"parsed={report.parsed} needs_review={report.needs_review} "
-        f"failed={report.failed} skipped={report.skipped} observations={report.observations}"
+        f"failed={report.failed} skipped={report.skipped} unavailable={report.unavailable} "
+        f"observations={report.observations}"
     )
     for error in report.errors:
         typer.echo(error, err=True)

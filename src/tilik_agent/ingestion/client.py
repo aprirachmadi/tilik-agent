@@ -6,7 +6,9 @@ The API key is sent on the request path and is never logged or written to disk.
 from __future__ import annotations
 
 import hashlib
+import html
 import json
+import re
 import time
 from typing import Any
 from urllib.parse import quote, urlparse
@@ -27,6 +29,17 @@ class BpsError(RuntimeError):
 
 class BpsTransientError(BpsError):
     """A transport or server failure that is worth retrying."""
+
+
+class BpsYearUnavailable(BpsError):
+    """BPS has no table for the requested year.
+
+    SIMDASI answers such a year inside the catalog span with HTTP 500 and
+    ``Undefined property: stdClass::$judul_tabel``, every time, so it is not retried.
+    """
+
+
+_MISSING_TABLE_MARKER = b"Undefined property: stdClass::$judul_tabel"
 
 
 def redact(value: Any, secret: str) -> Any:
@@ -100,10 +113,12 @@ class BpsClient:
             response = self._client.get(url)
         except httpx.TransportError as exc:
             raise BpsTransientError(f"BPS request failed for {endpoint}") from exc
+        body = response.content
+        if response.status_code == 500 and _MISSING_TABLE_MARKER in body:
+            raise BpsYearUnavailable(f"BPS has no {endpoint} table for this year (HTTP 500, judul_tabel undefined)")
         if response.status_code >= 500 or response.status_code == 429:
             raise BpsTransientError(f"BPS HTTP {response.status_code} for {endpoint}")
         content_type = response.headers.get("Content-Type", "")
-        body = response.content
         if "json" not in content_type.lower() and not body.lstrip().startswith((b"{", b"[")):
             raise BpsError(f"BPS returned non-JSON content for {endpoint}")
         payload = json.loads(body)
@@ -159,8 +174,20 @@ class BpsClient:
         body = response.content
         if len(body) > _MAX_DOWNLOAD_BYTES:
             raise BpsError("Workbook download exceeds 50 MiB")
+        if error := _html_error_page(body):
+            raise BpsError(f"BPS served an error page instead of the workbook: {error}")
         time.sleep(0.15)
         return body, response.headers.get("Content-Type", "application/octet-stream")
+
+
+def _html_error_page(body: bytes) -> str | None:
+    """Return the message of a BPS HTML error page (a broken workbook link answers HTTP 200 with one)."""
+    head = body[:8192].decode("utf-8", "replace")
+    if not re.match(r"\s*<(!doctype|html)", head, re.IGNORECASE):
+        return None
+    text = " ".join(html.unescape(re.sub(r"<[^>]+>", " ", head)).split())
+    match = re.search(r"Error (\d{3}) (.{0,200}?)(?: Badan Pusat Statistik|$)", text)
+    return None if match is None else f"{match.group(1)} {match.group(2)}".strip()
 
 
 def dynamic_years(payload: dict[str, Any], requested_year: int | None) -> list[int]:

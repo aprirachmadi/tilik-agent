@@ -14,14 +14,23 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from tilik_agent.ingestion.adapters.dynamic import parse_dynamic
+from tilik_agent.ingestion.adapters.manual import EXTRACTORS, NO_DATA, parse_manual
 from tilik_agent.ingestion.adapters.simdasi import parse_simdasi
 from tilik_agent.ingestion.adapters.static import parse_workbook
-from tilik_agent.ingestion.client import BpsClient, BpsError, dynamic_years, redact, simdasi_years
+from tilik_agent.ingestion.client import (
+    BpsClient,
+    BpsError,
+    BpsYearUnavailable,
+    dynamic_years,
+    redact,
+    simdasi_years,
+)
 from tilik_agent.ingestion.contracts import ParseResult
 from tilik_agent.ingestion.models import Dataset, IngestionCheckpoint, IngestionRun, RawObject
 from tilik_agent.ingestion.store import DuplicateMappingError, apply_parse_result
 
 PARSER_VERSION = "1"
+STATIC_PARSER_VERSION = "4"
 LOG = structlog.get_logger(__name__)
 _SAFE_RE = re.compile(r"[^A-Za-z0-9._=-]+")
 
@@ -34,6 +43,7 @@ class IngestReport:
     needs_review: int = 0
     failed: int = 0
     skipped: int = 0
+    unavailable: int = 0
     observations: int = 0
     errors: list[str] = field(default_factory=list)
 
@@ -137,7 +147,7 @@ def _ingest_dynamic(
     report: IngestReport,
 ) -> None:
     first_key = str(dataset.latest_period) if dataset.latest_period is not None else "undated"
-    if _done(session, dataset.id, first_key):
+    if _done(session, dataset, first_key):
         report.skipped += 1
         years = _dynamic_years_from_raw(raw_store, dataset, first_key, dataset.latest_period)
     else:
@@ -146,7 +156,7 @@ def _ingest_dynamic(
         years = dynamic_years(payload, dataset.latest_period)
     for year in years:
         key = str(year)
-        if _done(session, dataset.id, key):
+        if _done(session, dataset, key):
             report.skipped += 1
             continue
         payload = client.view_table(dataset.bps_table_id, year)
@@ -163,10 +173,16 @@ def _ingest_simdasi(
 ) -> None:
     for year in simdasi_years(dataset.oldest_period, dataset.latest_period):
         key = "undated" if year is None else str(year)
-        if _done(session, dataset.id, key):
+        if _done(session, dataset, key):
             report.skipped += 1
             continue
-        payload = client.view_table(dataset.bps_table_id, year)
+        try:
+            payload = client.view_table(dataset.bps_table_id, year)
+        except BpsYearUnavailable as exc:
+            _mark(session, dataset, key, "unavailable", None, str(exc))
+            report.unavailable += 1
+            session.commit()
+            continue
         _store_year(session, client, raw_store, dataset, run, report, key, payload, parse_simdasi)
 
 
@@ -178,8 +194,15 @@ def _ingest_static(
     run: IngestionRun,
     report: IngestReport,
 ) -> None:
-    if _done(session, dataset.id, "workbook"):
+    if _done(session, dataset, "workbook"):
         report.skipped += 1
+        return
+    if dataset.bps_table_id in NO_DATA:
+        _mark(session, dataset, "workbook", "unavailable", None, NO_DATA[dataset.bps_table_id])
+        dataset.parser_status = "unavailable"
+        dataset.parser_version = parser_version(dataset)
+        report.unavailable += 1
+        session.commit()
         return
     payload = client.view_table(dataset.bps_table_id, None)
     _remember_raw(session, raw_store, dataset, run, "detail.json", "view", payload, client)
@@ -204,7 +227,10 @@ def _ingest_static(
         content_type,
         None,
     )
-    result = parse_workbook(path, fallback_title=dataset.title)
+    if dataset.bps_table_id in EXTRACTORS:
+        result = parse_manual(dataset.bps_table_id, path)
+    else:
+        result = parse_workbook(path, fallback_title=dataset.title)
     _finish_parse(session, dataset, run, report, "workbook", digest, result, replace_labels=None)
 
 
@@ -251,7 +277,7 @@ def _finish_parse(
 ) -> None:
     if result.needs_review:
         dataset.parser_status = "needs_review"
-        dataset.parser_version = PARSER_VERSION
+        dataset.parser_version = parser_version(dataset)
         _mark(session, dataset, period_key, "needs_review", digest, result.review_reason)
         report.needs_review += 1
         session.commit()
@@ -268,13 +294,13 @@ def _finish_parse(
             )
     except DuplicateMappingError as exc:
         dataset.parser_status = "needs_review"
-        dataset.parser_version = PARSER_VERSION
+        dataset.parser_version = parser_version(dataset)
         _mark(session, dataset, period_key, "needs_review", digest, str(exc))
         report.needs_review += 1
         session.commit()
         return
     dataset.parser_status = "parsed"
-    dataset.parser_version = PARSER_VERSION
+    dataset.parser_version = parser_version(dataset)
     _mark(session, dataset, period_key, "parsed", digest, None)
     report.parsed += 1
     report.observations += written
@@ -358,15 +384,20 @@ def _raw_row(
     existing.ingestion_run_id = run.id
 
 
-def _done(session: Session, dataset_id: int, period_key: str) -> bool:
+def parser_version(dataset: Dataset) -> str:
+    """Return the parser version for a dataset's backend. Bumping one backend re-parses only its tables."""
+    return STATIC_PARSER_VERSION if dataset.tablesource == "1" else PARSER_VERSION
+
+
+def _done(session: Session, dataset: Dataset, period_key: str) -> bool:
     checkpoint = session.scalar(
         select(IngestionCheckpoint).where(
-            IngestionCheckpoint.dataset_id == dataset_id,
+            IngestionCheckpoint.dataset_id == dataset.id,
             IngestionCheckpoint.period_key == period_key,
-            IngestionCheckpoint.parser_version == PARSER_VERSION,
+            IngestionCheckpoint.parser_version == parser_version(dataset),
         )
     )
-    return checkpoint is not None and checkpoint.status in {"parsed", "needs_review"}
+    return checkpoint is not None and checkpoint.status in {"parsed", "needs_review", "unavailable"}
 
 
 def _mark(
@@ -381,7 +412,7 @@ def _mark(
         select(IngestionCheckpoint).where(
             IngestionCheckpoint.dataset_id == dataset.id,
             IngestionCheckpoint.period_key == period_key,
-            IngestionCheckpoint.parser_version == PARSER_VERSION,
+            IngestionCheckpoint.parser_version == parser_version(dataset),
         )
     )
     if checkpoint is None:
@@ -389,7 +420,7 @@ def _mark(
             IngestionCheckpoint(
                 dataset_id=dataset.id,
                 period_key=period_key,
-                parser_version=PARSER_VERSION,
+                parser_version=parser_version(dataset),
                 content_sha256=digest,
                 status=status,
                 error_message=error,
