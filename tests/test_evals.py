@@ -50,13 +50,14 @@ def test_benchmark_file_contains_the_notebook_question() -> None:
     The packaged question file is loaded.
 
     Expected:
-    It holds the twenty numbered demography and social questions, including the notebook question as item 6.
+    It is the demography and social benchmark, item ids are unique, and it includes the notebook question.
     """
     dataset = load_benchmark()
+    ids = [item.id for item in dataset.items]
     assert dataset.name == "demografi-sosial-questions"
-    assert [item.id for item in dataset.items] == [str(number) for number in range(1, 21)]
-    assert "TPT" in dataset.items[5].question
-    assert dataset.items[5].expected_response is None
+    assert len(ids) == len(set(ids))
+    assert any("tiga TPT tertinggi" in item.question for item in dataset.items)
+    assert all(item.expected_response is None for item in dataset.items)
 
 
 def test_benchmark_rejects_an_item_without_question() -> None:

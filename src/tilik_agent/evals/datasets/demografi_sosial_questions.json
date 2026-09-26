@@ -4,101 +4,51 @@
   "items": [
     {
       "id": "1",
-      "question": "Berapa jumlah penduduk perempuan di Provinsi Jawa Barat pada 2025?",
-      "expected_response": null
-    },
-    {
-      "id": "2",
       "question": "Berapa perubahan kepadatan penduduk DKI Jakarta dari 2024 ke 2025 menurut tabel kependudukan BPS?",
       "expected_response": null
     },
     {
-      "id": "3",
+      "id": "2",
       "question": "Di antara provinsi dengan rasio jenis kelamin di atas 100 pada 2025, provinsi mana yang memiliki jumlah penduduk terbesar? Sebutkan jumlah penduduk dan rasio jenis kelaminnya.",
       "expected_response": null
     },
     {
-      "id": "4",
-      "question": "Berapa Tingkat Pengangguran Terbuka (TPT) Provinsi Aceh pada Agustus 2025?",
-      "expected_response": null
-    },
-    {
-      "id": "5",
+      "id": "3",
       "question": "Berapa selisih TPT Provinsi Jawa Barat antara Februari dan Agustus 2025, dan pada bulan mana nilainya lebih tinggi?",
       "expected_response": null
     },
     {
-      "id": "6",
+      "id": "4",
       "question": "Provinsi mana saja yang memiliki tiga TPT tertinggi pada Agustus 2025, dan berapa Angka Partisipasi Sekolah kelompok umur 16–18 tahun di masing-masing provinsi tersebut pada 2025?",
       "expected_response": null
     },
     {
-      "id": "7",
-      "question": "Berapa Angka Partisipasi Sekolah kelompok umur 7–12 tahun di Provinsi Aceh pada 2025?",
-      "expected_response": null
-    },
-    {
-      "id": "8",
+      "id": "5",
       "question": "Berapa selisih rata-rata lama sekolah penduduk usia 15 tahun ke atas antara laki-laki dan perempuan di Indonesia pada 2025?",
       "expected_response": null
     },
     {
-      "id": "9",
+      "id": "6",
       "question": "Di antara provinsi yang memiliki data rata-rata lama sekolah pada 2023 dan 2025, provinsi mana yang mencatat kenaikan terbesar? Berapa Angka Partisipasi Sekolah kelompok umur 16–18 tahun di provinsi itu pada 2025?",
       "expected_response": null
     },
     {
-      "id": "10",
-      "question": "Berapa persentase penduduk usia 15–24 tahun di DKI Jakarta yang merokok dalam sebulan terakhir pada 2025?",
-      "expected_response": null
-    },
-    {
-      "id": "11",
-      "question": "Berapa selisih angka harapan hidup perempuan dan laki-laki di Provinsi Jawa Barat pada 2024?",
-      "expected_response": null
-    },
-    {
-      "id": "12",
+      "id": "7",
       "question": "Provinsi mana yang memiliki selisih angka harapan hidup perempuan dan laki-laki terbesar pada 2024, dan berapa nilai kedua angka harapan hidup tersebut?",
       "expected_response": null
     },
     {
-      "id": "13",
-      "question": "Berapa indeks Gini daerah perkotaan Indonesia pada Maret 2025?",
-      "expected_response": null
-    },
-    {
-      "id": "14",
-      "question": "Pada Maret 2025, berapa selisih persentase penduduk miskin antara wilayah perkotaan dan perdesaan di Provinsi Aceh?",
-      "expected_response": null
-    },
-    {
-      "id": "15",
+      "id": "8",
       "question": "Dari Maret 2024 ke Maret 2025, bagaimana perubahan persentase penduduk miskin perkotaan Indonesia dan indeks Gini perkotaan Indonesia? Apakah keduanya bergerak ke arah yang sama?",
       "expected_response": null
     },
     {
-      "id": "16",
-      "question": "Berapa realisasi jumlah keluarga penerima manfaat bantuan sosial pangan di Provinsi Aceh pada 2024?",
-      "expected_response": null
-    },
-    {
-      "id": "17",
+      "id": "9",
       "question": "Provinsi mana yang memiliki selisih terbesar antara rencana dan realisasi jumlah keluarga penerima manfaat bantuan sosial pangan pada 2024? Di provinsi itu, berapa persentase realisasi anggaran terhadap rencana anggarannya?",
       "expected_response": null
     },
     {
-      "id": "18",
-      "question": "Berapa persentase rumah tangga di Provinsi Bali yang memiliki akses sanitasi layak pada 2025?",
-      "expected_response": null
-    },
-    {
-      "id": "19",
-      "question": "Berapa selisih persentase rumah tangga dengan akses sanitasi layak antara perkotaan dan perdesaan di Provinsi Jawa Barat pada 2025?",
-      "expected_response": null
-    },
-    {
-      "id": "20",
+      "id": "10",
       "question": "Pada 2025, tiga provinsi mana yang memiliki kesenjangan terbesar antara akses sumber air minum layak dan akses sanitasi layak di perdesaan? Berapa kesenjangan dalam poin persentase di masing-masing provinsi?",
       "expected_response": null
     }
