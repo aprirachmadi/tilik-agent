@@ -39,23 +39,40 @@ def get_llm() -> ChatOpenAI:
     return _chat
 
 
+_vector_store: PGVector | None = None
+_vector_store_key: tuple[Any, ...] | None = None
+
+
 def get_vector_store() -> PGVector:
-    """Construct lazily so SQL-only questions do not load the embedding model."""
+    """Return one vector store, rebuilding it when embedding or collection settings change."""
+    global _vector_store, _vector_store_key
     config = get_agent_config()
+    connection = os.getenv(
+        "PGVECTOR_CONNECTION",
+        "postgresql+psycopg://tilik:tilik@localhost:5432/tilik",
+    )
+    key = (
+        config.embedding.model,
+        config.embedding.device,
+        config.embedding.normalize_embeddings,
+        config.retrieval.collection,
+        connection,
+    )
+    if _vector_store is not None and _vector_store_key == key:
+        return _vector_store
     embedding = HuggingFaceEmbeddings(
         model_name=config.embedding.model,
         model_kwargs={"device": config.embedding.device},
         encode_kwargs={"normalize_embeddings": config.embedding.normalize_embeddings},
     )
-    return PGVector(
+    _vector_store = PGVector(
         embeddings=embedding,
         collection_name=config.retrieval.collection,
-        connection=os.getenv(
-            "PGVECTOR_CONNECTION",
-            "postgresql+psycopg://tilik:tilik@localhost:5432/tilik",
-        ),
+        connection=connection,
         use_jsonb=True,
     )
+    _vector_store_key = key
+    return _vector_store
 
 
 def model_json(schema: type[SchemaT], prompt: str) -> SchemaT:
