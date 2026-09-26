@@ -105,7 +105,6 @@ Rows: {compact_json(evidence_rows(rows))}"""
             if row is None or Decimal(str(point.value)) != Decimal(str(row["value"])):
                 raise ValueError("Chart point does not match a cited observation")
         spec = chart.model_dump()
-        display_chart_spec(spec)
         return {"chart": spec}
     except (ValidationError, ValueError, APIError) as exc:
         return {"chart": None, "chart_error": f"Chart unavailable: {exc}"}
