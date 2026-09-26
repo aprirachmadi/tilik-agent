@@ -72,6 +72,17 @@ def _load(*, table_id: str | None) -> IngestReport:
         return ingest_datasets(session, client, raw_store=raw_store, table_id=table_id)
 
 
+@app.command("serve")
+def serve(
+    host: str = typer.Option("127.0.0.1", help="Bind address"),
+    port: int = typer.Option(8000, help="Bind port"),
+) -> None:
+    """Serve the question API."""
+    import uvicorn
+
+    uvicorn.run("tilik_agent.api:app", host=host, port=port)
+
+
 def _echo_report(report: IngestReport) -> None:
     typer.echo(
         f"parsed={report.parsed} needs_review={report.needs_review} "
