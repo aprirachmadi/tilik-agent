@@ -75,7 +75,7 @@ def _load(*, table_id: str | None) -> IngestReport:
 @app.command("serve")
 def serve(
     host: str = typer.Option("127.0.0.1", help="Bind address"),
-    port: int = typer.Option(8000, help="Bind port"),
+    port: int = typer.Option(4321, help="Bind port"),
 ) -> None:
     """Serve the question API."""
     import uvicorn
