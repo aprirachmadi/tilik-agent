@@ -14,19 +14,29 @@ from langchain_postgres import PGVector
 from pydantic import BaseModel
 
 from tilik_agent.agent.schemas import State
-from tilik_agent.config import get_agent_config, load_project_env
+from tilik_agent.config import LlmConfig, get_agent_config
 
 SchemaT = TypeVar("SchemaT", bound=BaseModel)
 
-load_project_env()
-_llm_config = get_agent_config().llm
-llm = ChatOpenAI(
-    model=_llm_config.model,
-    temperature=_llm_config.temperature,
-    base_url=_llm_config.base_url,
-    api_key=os.environ[_llm_config.api_key_env],
-    extra_body=_llm_config.extra_body,
-)
+_chat: ChatOpenAI | None = None
+_chat_config: LlmConfig | None = None
+
+
+def get_llm() -> ChatOpenAI:
+    """Return the chat client, rebuilding it when the yaml ``llm`` block changes."""
+    global _chat, _chat_config
+    config = get_agent_config().llm
+    if _chat is not None and _chat_config == config:
+        return _chat
+    _chat = ChatOpenAI(
+        model=config.model,
+        temperature=config.temperature,
+        base_url=config.base_url,
+        api_key=os.environ[config.api_key_env],
+        extra_body=config.extra_body,
+    )
+    _chat_config = config
+    return _chat
 
 
 def get_vector_store() -> PGVector:
@@ -50,11 +60,11 @@ def get_vector_store() -> PGVector:
 
 def model_json(schema: type[SchemaT], prompt: str) -> SchemaT:
     """Use tool-call structured output, as supported by the source SQL agent's LLM."""
-    return llm.with_structured_output(schema, method="function_calling").invoke([HumanMessage(content=prompt)])
+    return get_llm().with_structured_output(schema, method="function_calling").invoke([HumanMessage(content=prompt)])
 
 
 def llm_text(prompt: str) -> str:
-    content = llm.invoke([HumanMessage(content=prompt)]).content
+    content = get_llm().invoke([HumanMessage(content=prompt)]).content
     return "".join(str(item) for item in content) if isinstance(content, list) else str(content)
 
 

@@ -15,9 +15,9 @@ from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
 from openai import APIError
 
-from tilik_agent.agent.runtime import llm
+from tilik_agent.agent.runtime import get_llm
 from tilik_agent.agent.schemas import PlanStep
-from tilik_agent.config import get_agent_config
+from tilik_agent.config import LlmConfig, get_agent_config
 
 
 def get_connection() -> psycopg.Connection:
@@ -317,7 +317,19 @@ def build_agent(chat_model: ChatOpenAI):
     return sql_graph.compile()
 
 
-sql_agent = build_agent(llm)
+_sql_agent: Any = None
+_sql_agent_config: LlmConfig | None = None
+
+
+def get_sql_agent() -> Any:
+    """Return the inner SQL graph, rebuilding it when the yaml ``llm`` block changes."""
+    global _sql_agent, _sql_agent_config
+    config = get_agent_config().llm
+    if _sql_agent is not None and _sql_agent_config == config:
+        return _sql_agent
+    _sql_agent = build_agent(get_llm())
+    _sql_agent_config = config
+    return _sql_agent
 
 
 def _tool_payload(message: Any) -> dict[str, Any]:
@@ -401,7 +413,7 @@ def _sql_step_once(step: PlanStep, question: str, dependency: str = "") -> dict[
     max_tool_rounds = config.dataset_lookup.max_tool_rounds
     recursion_limit = config.graph.recursion_limit
     try:
-        for update in sql_agent.stream(
+        for update in get_sql_agent().stream(
             {"messages": [HumanMessage(content=prompt)]},
             config={"recursion_limit": recursion_limit},
             stream_mode="updates",

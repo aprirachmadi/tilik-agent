@@ -119,13 +119,27 @@ def get_settings() -> Settings:
     return Settings()
 
 
-@lru_cache(maxsize=1)
+_yaml_mtime_ns: int | None = None
+_yaml_config: AgentConfig | None = None
+
+
+def _yaml_agent_config() -> AgentConfig:
+    """Parse ``configs/default.yaml`` again when the file's modification time changes."""
+    global _yaml_mtime_ns, _yaml_config
+    path = project_root() / "configs" / "default.yaml"
+    mtime_ns = path.stat().st_mtime_ns
+    if _yaml_config is not None and _yaml_mtime_ns == mtime_ns:
+        return _yaml_config
+    loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
+    _yaml_config = AgentConfig.model_validate(loaded)
+    _yaml_mtime_ns = mtime_ns
+    return _yaml_config
+
+
 def get_agent_config() -> AgentConfig:
     """Return agent settings from ``configs/default.yaml``, with env overrides applied."""
     load_project_env()
-    path = project_root() / "configs" / "default.yaml"
-    loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
-    config = AgentConfig.model_validate(loaded)
+    config = _yaml_agent_config()
     llm_updates: dict[str, str] = {}
     model = os.getenv("TILIK_MODEL")
     base_url = os.getenv("TILIK_LLM_BASE_URL")
