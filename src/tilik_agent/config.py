@@ -4,13 +4,21 @@ BPS statistics and publication embeddings share one Postgres database.
 Statistical observations use the tables in ``tilik_agent.ingestion.models``.
 Publication chunks stay in the LangChain pgvector tables ``langchain_pg_collection``
 and ``langchain_pg_embedding``.
+
+The question agent reads model and limit settings from ``configs/default.yaml``.
+Secrets stay in the environment.
 """
 
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 from pathlib import Path
+from typing import Any
 
+import yaml
+from dotenv import load_dotenv
+from pydantic import BaseModel, ConfigDict
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -26,7 +34,112 @@ class Settings(BaseSettings):
     bps_subcat: int = 514
 
 
+class LlmConfig(BaseModel):
+    """Chat model settings. ``api_key_env`` names the variable in ``.env``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    model: str
+    base_url: str
+    temperature: float
+    api_key_env: str
+    extra_body: dict[str, Any]
+
+
+class EmbeddingConfig(BaseModel):
+    """Sentence-transformer settings for the SP2020 vector store."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    model: str
+    device: str
+    normalize_embeddings: bool
+
+
+class RetrievalConfig(BaseModel):
+    """SP2020 search settings."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    collection: str
+    top_k: int
+    max_rewrites: int
+
+
+class DatasetLookupConfig(BaseModel):
+    """Caps for the read-only dataset tools and one lookup step."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    max_search_results: int
+    max_measures: int
+    max_dimension_members: int
+    max_periods: int
+    max_observations: int
+    max_tool_rounds: int
+
+
+class GraphConfig(BaseModel):
+    """LangGraph run settings."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    recursion_limit: int
+
+
+class AgentConfig(BaseModel):
+    """Question-agent settings from ``configs/default.yaml``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    llm: LlmConfig
+    embedding: EmbeddingConfig
+    retrieval: RetrievalConfig
+    dataset_lookup: DatasetLookupConfig
+    graph: GraphConfig
+
+
+def project_root() -> Path:
+    """Return the repository root, whether the process started in it or in ``notebooks``."""
+    start = Path.cwd()
+    for candidate in (start, *start.parents):
+        if (candidate / "pyproject.toml").exists():
+            return candidate
+    return Path(__file__).resolve().parents[2]
+
+
+def load_project_env() -> None:
+    """Load ``.env`` from the repository root without overriding existing variables."""
+    load_dotenv(project_root() / ".env")
+
+
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     """Return the process-wide settings instance."""
     return Settings()
+
+
+@lru_cache(maxsize=1)
+def get_agent_config() -> AgentConfig:
+    """Return agent settings from ``configs/default.yaml``, with env overrides applied."""
+    load_project_env()
+    path = project_root() / "configs" / "default.yaml"
+    loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
+    config = AgentConfig.model_validate(loaded)
+    llm_updates: dict[str, str] = {}
+    model = os.getenv("TILIK_MODEL")
+    base_url = os.getenv("TILIK_LLM_BASE_URL")
+    if model:
+        llm_updates["model"] = model
+    if base_url:
+        llm_updates["base_url"] = base_url
+    retrieval_updates: dict[str, str] = {}
+    collection = os.getenv("SP2020_COLLECTION")
+    if collection:
+        retrieval_updates["collection"] = collection
+    return config.model_copy(
+        update={
+            "llm": config.llm.model_copy(update=llm_updates),
+            "retrieval": config.retrieval.model_copy(update=retrieval_updates),
+        }
+    )

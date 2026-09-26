@@ -18,6 +18,7 @@ python = ">=3.11,<3.14"
 pydantic = "^2.10"
 pydantic-settings = "^2.7"
 python-dotenv = "^1.0"
+pyyaml = "^6.0"
 
 # HTTP clients (BPS API, tool calls, web fetch)
 httpx = "^0.28"
@@ -43,6 +44,7 @@ mcp = "^1.8"
 # Data handling (CSV samples, observation tables, analytics)
 pandas = "^2.2"
 numpy = "^2.2"
+plotly = "^6.0"
 pyarrow = "^19.0"
 sqlalchemy = "^2.0"
 

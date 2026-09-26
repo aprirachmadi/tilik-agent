@@ -1,0 +1,28 @@
+llm:
+  model: qwen3.8-flash
+  base_url: https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1
+  temperature: 0
+  api_key_env: OPENAI_API_KEY
+  extra_body:
+    enable_thinking: false
+
+embedding:
+  model: sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
+  device: cpu
+  normalize_embeddings: true
+
+retrieval:
+  collection: bps-sp2020-demografi
+  top_k: 5
+  max_rewrites: 2
+
+dataset_lookup:
+  max_search_results: 10
+  max_measures: 30
+  max_dimension_members: 200
+  max_periods: 50
+  max_observations: 100
+  max_tool_rounds: 8
+
+graph:
+  recursion_limit: 25
