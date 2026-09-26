@@ -44,7 +44,9 @@ Fill in `.env` before serving. The API listens on [http://127.0.0.1:4321](http:/
 | `BPS_API_KEY` | Catalog and table ingest. |
 | `LANGFUSE_PUBLIC_KEY` | Question traces. Leave empty to answer without sending a trace. |
 | `LANGFUSE_SECRET_KEY` | Question traces, paired with the public key. |
-| `LANGFUSE_BASE_URL` | Langfuse host. The cloud default is `https://cloud.langfuse.com`. |
+| `LANGFUSE_BASE_URL` | Langfuse host. Local Compose serves it at `http://localhost:3000`. |
+
+The first boot of the Langfuse services creates the project `tilik`. Sign in at [http://localhost:3000](http://localhost:3000) as `tilik@example.com` with password `tilik`.
 
 `notebooks/test_e2e_agent.ipynb` streams the same graph and draws the chart with Plotly.
 
