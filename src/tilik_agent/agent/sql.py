@@ -17,6 +17,7 @@ from openai import APIError
 
 from tilik_agent.agent.runtime import get_llm
 from tilik_agent.agent.schemas import PlanStep
+from tilik_agent.agent.tracing import current_callbacks
 from tilik_agent.config import LlmConfig, get_agent_config
 
 
@@ -413,9 +414,13 @@ def _sql_step_once(step: PlanStep, question: str, dependency: str = "") -> dict[
     max_tool_rounds = config.dataset_lookup.max_tool_rounds
     recursion_limit = config.graph.recursion_limit
     try:
+        stream_config: dict[str, Any] = {"recursion_limit": recursion_limit}
+        callbacks = current_callbacks()
+        if callbacks:
+            stream_config["callbacks"] = callbacks
         for update in get_sql_agent().stream(
             {"messages": [HumanMessage(content=prompt)]},
-            config={"recursion_limit": recursion_limit},
+            config=stream_config,
             stream_mode="updates",
         ):
             for node_name, payload in update.items():

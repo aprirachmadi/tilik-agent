@@ -14,6 +14,7 @@ from langchain_postgres import PGVector
 from pydantic import BaseModel
 
 from tilik_agent.agent.schemas import State
+from tilik_agent.agent.tracing import current_callbacks
 from tilik_agent.config import LlmConfig, get_agent_config
 
 SchemaT = TypeVar("SchemaT", bound=BaseModel)
@@ -75,13 +76,21 @@ def get_vector_store() -> PGVector:
     return _vector_store
 
 
+def _invoke_kwargs() -> dict[str, Any]:
+    callbacks = current_callbacks()
+    if not callbacks:
+        return {}
+    return {"config": {"callbacks": callbacks}}
+
+
 def model_json(schema: type[SchemaT], prompt: str) -> SchemaT:
     """Use tool-call structured output, as supported by the source SQL agent's LLM."""
-    return get_llm().with_structured_output(schema, method="function_calling").invoke([HumanMessage(content=prompt)])
+    structured = get_llm().with_structured_output(schema, method="function_calling")
+    return structured.invoke([HumanMessage(content=prompt)], **_invoke_kwargs())
 
 
 def llm_text(prompt: str) -> str:
-    content = get_llm().invoke([HumanMessage(content=prompt)]).content
+    content = get_llm().invoke([HumanMessage(content=prompt)], **_invoke_kwargs()).content
     return "".join(str(item) for item in content) if isinstance(content, list) else str(content)
 
 

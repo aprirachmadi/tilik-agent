@@ -41,26 +41,63 @@ Fill in `.env` before serving. The API listens on [http://127.0.0.1:4321](http:/
 | `OPENAI_API_KEY` | Chat model. `configs/default.yaml` names this variable in `llm.api_key_env`. |
 | `SQL_AGENT_PASSWORD` | Read-only `sql_agent` role used while answering. |
 | `BPS_API_KEY` | Catalog and table ingest. |
+| `LANGFUSE_PUBLIC_KEY` | Question traces. Leave empty to answer without sending a trace. |
+| `LANGFUSE_SECRET_KEY` | Question traces, paired with the public key. |
+| `LANGFUSE_BASE_URL` | Langfuse host. The cloud default is `https://cloud.langfuse.com`. |
 
 `notebooks/test_e2e_agent.ipynb` streams the same graph and draws the chart with Plotly.
 
 ## Pipeline
 
-`compile_graph()` in `tilik_agent.agent` builds the graph below. `plan_question` returns a short plan whose steps are `sql_lookup`, `retrieve_sp2020`, or `calculate`.
+`compile_graph()` in `tilik_agent.agent` builds the graph below. `plan_question` returns a short plan whose steps are `sql_lookup`, `retrieve_sp2020`, or `calculate`. A `both` plan runs the retrieval and SQL loops. A calculation waits until the steps it depends on have finished.
 
 ```mermaid
 flowchart TD
-  startNode([START]) --> plan_question
-  plan_question -->|context| run_retrieval
-  plan_question -->|data| run_sql
-  plan_question -->|both| run_both
-  plan_question -->|limited| write_answer
-  run_retrieval --> write_answer
-  run_sql --> write_answer
-  run_both --> write_answer
-  write_answer -->|yes| build_chart
-  write_answer -->|no| endNode([END])
-  build_chart --> endNode
+    START([User question]) --> PLAN[Plan question]
+
+    PLAN -->|context| R[Run retrieval]
+    PLAN -->|data| S[Run SQL lookup]
+    PLAN -->|both| MIX[Run the planned mix]
+    PLAN -->|limited| ANSWER[Write a sourced answer]
+
+    MIX --> R
+    MIX --> S
+
+    subgraph retrieval [Retrieval]
+        R --> SEARCH[Search SP2020 excerpts]
+        SEARCH --> GRADE[Grade each excerpt]
+        GRADE -->|Relevant| RDOC[Return excerpts and sources]
+        GRADE -->|None relevant, rewrites left| REWRITE[Rewrite the search query]
+        REWRITE --> SEARCH
+        GRADE -->|None relevant, rewrite cap reached| RERR[Record a retrieval error]
+    end
+
+    subgraph sql_lookup [SQL lookup]
+        S --> AGENT[Choose the next dataset tool]
+        AGENT -->|search_datasets| FIND[Find datasets]
+        AGENT -->|describe_dataset| DESCRIBE[Inspect measures, periods, and members]
+        AGENT -->|get_observations| VALUES[Get observation rows]
+        FIND --> HARVEST[Harvest rows, units, and source details]
+        DESCRIBE --> HARVEST
+        VALUES --> HARVEST
+        HARVEST -->|More rounds left| AGENT
+        HARVEST -->|Tool-round cap| SDATA[Return rows and warnings]
+        AGENT -->|Brief status| SDATA
+    end
+
+    RDOC --> COLLECT[Collect evidence]
+    RERR --> COLLECT
+    SDATA --> COLLECT
+
+    COLLECT --> CALC{Calculation step?}
+    CALC -->|Yes| VERIFY[Verify arithmetic against stored values]
+    CALC -->|No| ANSWER
+    VERIFY --> ANSWER
+
+    ANSWER --> CHART{Chart needed?}
+    CHART -->|Requested, or a comparison with two values| VIS[Build a chart spec]
+    CHART -->|Not needed| RESP([Response])
+    VIS --> RESP
 ```
 
 | Route | What runs |

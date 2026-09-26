@@ -7,9 +7,7 @@ from typing import Any
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
 
-from tilik_agent.agent import compile_graph
-from tilik_agent.agent.schemas import State
-from tilik_agent.config import get_agent_config
+from tilik_agent.agent.runner import run_question
 
 app = FastAPI(title="Tilik")
 
@@ -30,28 +28,18 @@ class QuestionResponse(BaseModel):
     retrieval_error: str | None = None
 
 
-def run_question(question: str) -> QuestionResponse:
-    """Stream the graph the same way the notebook does and return the merged state."""
-    graph = compile_graph()
-    limit = get_agent_config().graph.recursion_limit
-    state: State = {"question": question}
-    for update in graph.stream(state, config={"recursion_limit": limit}, stream_mode="updates"):
-        for payload in update.values():
-            state.update(payload)
-    return QuestionResponse(
-        answer=state.get("answer"),
-        chart=state.get("chart"),
-        answer_observation_ids=state.get("answer_observation_ids") or [],
-        answer_document_ids=state.get("answer_document_ids") or [],
-        step_status=state.get("step_status") or {},
-        plan_error=state.get("plan_error"),
-        sql_error=state.get("sql_error"),
-        sql_warnings=state.get("sql_warnings"),
-        retrieval_error=state.get("retrieval_error"),
-    )
-
-
 @app.post("/questions")
 def questions(body: QuestionRequest) -> QuestionResponse:
     """Answer one question and return the chart spec when the graph built one."""
-    return run_question(body.question)
+    result = run_question(body.question)
+    return QuestionResponse(
+        answer=result.answer,
+        chart=result.chart,
+        answer_observation_ids=result.answer_observation_ids,
+        answer_document_ids=result.answer_document_ids,
+        step_status=result.step_status,
+        plan_error=result.plan_error,
+        sql_error=result.sql_error,
+        sql_warnings=result.sql_warnings,
+        retrieval_error=result.retrieval_error,
+    )

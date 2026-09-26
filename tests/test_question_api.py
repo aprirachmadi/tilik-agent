@@ -15,6 +15,7 @@ class _Graph:
     def stream(self, state: dict[str, Any], config: dict[str, Any], stream_mode: str) -> Any:
         assert state["question"] == "berapa"
         assert config["recursion_limit"] == get_agent_config().graph.recursion_limit
+        assert "callbacks" not in config
         assert stream_mode == "updates"
         yield {
             "write_answer": {
@@ -44,7 +45,8 @@ def test_questions_returns_answer_and_chart(monkeypatch: pytest.MonkeyPatch) -> 
     Expected:
     The response body contains that answer, chart, and evidence ids.
     """
-    monkeypatch.setattr("tilik_agent.api.compile_graph", lambda: _Graph())
+    monkeypatch.setattr("tilik_agent.agent.runner.compile_graph", lambda: _Graph())
+    monkeypatch.setattr("tilik_agent.agent.tracing.langfuse_configured", lambda: False)
     response = TestClient(app).post("/questions", json={"question": "berapa"})
     assert response.status_code == 200
     body = response.json()
