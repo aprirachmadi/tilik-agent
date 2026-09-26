@@ -22,6 +22,7 @@ Tilik plans the work, looks up figures in Postgres, searches the publication in 
 - [Pipeline](#pipeline)
 - [Ask a question](#ask-a-question)
 - [Configuration](#configuration)
+- [Benchmark](#benchmark)
 - [Ingest](#ingest)
 
 ## Quick start
@@ -160,6 +161,7 @@ A chart spec has `type` (`bar` or `line`), `title`, `x_axis`, `y_axis`, and `dat
 | `retrieval` | `collection`, `top_k`, `max_rewrites` |
 | `dataset_lookup` | `max_search_results`, `max_measures`, `max_dimension_members`, `max_periods`, `max_observations`, `max_tool_rounds` |
 | `graph` | `recursion_limit` |
+| `evals` | Judge model and which benchmark metrics are enabled. The question agent keeps using `llm`. |
 
 These variables override the file when they are set:
 
@@ -172,6 +174,14 @@ These variables override the file when they are set:
 | `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB` | Observation database used by SQL lookup. |
 
 Secrets stay in `.env`. The yaml file only names the API-key variable.
+
+## Benchmark
+
+`poetry run tilik eval` is the only command that runs the judges. It answers each question in `src/tilik_agent/evals/datasets/bps_questions.json` through the same `run_question` path as the API, then scores the metrics whose `enabled` flag is true under `evals.metrics`. `POST /questions` and the notebook trace the question and do not call the judges.
+
+`task_completion` and `argument_correctness` are referenceless LLM judges. They use `evals.judge`, which starts as a copy of the Qwen settings. `pipeline_status` records whether the planned steps succeeded, partially succeeded, or failed. It is not a judge.
+
+When both Langfuse keys are set, the command upserts that JSON file into a Langfuse dataset and stores the enabled scores on a dataset run named with the file's `version`. Without the keys, it prints the scores and skips the upload.
 
 ## Ingest
 

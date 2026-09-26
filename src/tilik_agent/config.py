@@ -87,6 +87,42 @@ class GraphConfig(BaseModel):
     recursion_limit: int
 
 
+class JudgeMetricConfig(BaseModel):
+    """One LLM-as-a-judge metric. ``enabled`` false skips it for that benchmark."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool
+    threshold: float
+
+
+class StatusMetricConfig(BaseModel):
+    """The raw graph status recorded beside the judge metrics."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool
+
+
+class EvalsMetricsConfig(BaseModel):
+    """Benchmark metrics. Each one can be turned off on its own."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    task_completion: JudgeMetricConfig
+    argument_correctness: JudgeMetricConfig
+    pipeline_status: StatusMetricConfig
+
+
+class EvalsConfig(BaseModel):
+    """Judge model and metric switches for ``tilik eval``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    judge: LlmConfig
+    metrics: EvalsMetricsConfig
+
+
 class AgentConfig(BaseModel):
     """Question-agent settings from ``configs/default.yaml``."""
 
@@ -97,6 +133,7 @@ class AgentConfig(BaseModel):
     retrieval: RetrievalConfig
     dataset_lookup: DatasetLookupConfig
     graph: GraphConfig
+    evals: EvalsConfig
 
 
 def project_root() -> Path:

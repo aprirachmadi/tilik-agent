@@ -72,6 +72,14 @@ def _load(*, table_id: str | None) -> IngestReport:
         return ingest_datasets(session, client, raw_store=raw_store, table_id=table_id)
 
 
+@app.command("eval")
+def evaluate() -> None:
+    """Score the question file. This command is the only place the judges run."""
+    from tilik_agent.evals.runner import run_benchmark
+
+    typer.echo(run_benchmark())
+
+
 @app.command("serve")
 def serve(
     host: str = typer.Option("127.0.0.1", help="Bind address"),

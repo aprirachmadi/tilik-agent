@@ -26,3 +26,22 @@ dataset_lookup:
 
 graph:
   recursion_limit: 25
+
+evals:
+  judge:
+    model: qwen3.8-flash
+    base_url: https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1
+    temperature: 0
+    api_key_env: OPENAI_API_KEY
+    extra_body:
+      enable_thinking: false
+  metrics:
+    task_completion:
+      enabled: true
+      threshold: 0.5
+    argument_correctness:
+      enabled: true
+      threshold: 0.5
+    # Raw graph status (succeeded, partial, failed). Not an LLM-as-a-judge metric.
+    pipeline_status:
+      enabled: true
