@@ -2,12 +2,20 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from deepeval.models import DeepEvalBaseLLM
+from deepeval.test_case import LLMTestCase
+from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.tools import tool
+from langgraph.graph import END, START, MessagesState, StateGraph
+from langgraph.prebuilt import ToolNode
 from pydantic import ValidationError
 
+from tilik_agent.agent.runner import QuestionResult
 from tilik_agent.config import (
     EvalsMetricsConfig,
     JudgeMetricConfig,
@@ -19,7 +27,39 @@ from tilik_agent.evals.dataset import load_benchmark, parse_benchmark
 from tilik_agent.evals.judge import YamlJudge
 from tilik_agent.evals.langfuse_dataset import sync_benchmark
 from tilik_agent.evals.metrics import argument_correctness_metric, task_completion_metric
+from tilik_agent.evals.runner import _score_question
 from tilik_agent.evals.scores import ItemScore, assemble_scores, pipeline_status_label
+
+
+@tool
+def search_datasets(query: str) -> str:
+    """Search the dataset catalog."""
+    return '{"datasets": [{"id": 7}]}'
+
+
+class _CapturingMetric:
+    def __init__(self, cases: list[LLMTestCase]) -> None:
+        self.cases = cases
+        self.score = 1.0
+        self.reason = "ok"
+
+    def measure(self, case: LLMTestCase) -> None:
+        self.cases.append(case)
+
+
+def _run_with_one_tool_call(question: str, *, callbacks: Sequence[Any] | None = None) -> QuestionResult:
+    def agent(state: MessagesState) -> dict[str, Any]:
+        call = {"name": "search_datasets", "args": {"query": "TPT Agustus 2025"}, "id": "c1"}
+        return {"messages": [AIMessage(content="", tool_calls=[call])]}
+
+    graph = StateGraph(MessagesState)
+    graph.add_node("agent", agent)
+    graph.add_node("tools", ToolNode([search_datasets]))
+    graph.add_edge(START, "agent")
+    graph.add_edge("agent", "tools")
+    graph.add_edge("tools", END)
+    graph.compile().invoke({"messages": [HumanMessage(content=question)]}, config={"callbacks": list(callbacks or [])})
+    return QuestionResult(answer="Papua 6,96", step_status={"s1": {"status": "succeeded", "error": ""}})
 
 
 class _DummyJudge(DeepEvalBaseLLM):
@@ -191,6 +231,37 @@ def test_sync_upserts_question_ids_and_archives_removals() -> None:
     assert client.calls[0]["id"] == "1"
     archived = next(call for call in client.calls if call["id"] == "old-question")
     assert getattr(archived["status"], "value", archived["status"]) == "ARCHIVED"
+
+
+def test_judges_receive_the_recorded_tool_calls_and_trajectory(monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    Condition:
+    A question run makes one real tool call while the DeepEval handler records it, and both judges are enabled.
+
+    Expected:
+    Argument correctness receives that tool call with its arguments, and task completion receives the
+    trajectory as a span dict that contains the tool span.
+    """
+    task_cases: list[LLMTestCase] = []
+    argument_cases: list[LLMTestCase] = []
+    monkeypatch.setattr("tilik_agent.evals.runner.run_question", _run_with_one_tool_call)
+    monkeypatch.setattr("tilik_agent.evals.runner.task_completion_metric", lambda *_: _CapturingMetric(task_cases))
+    monkeypatch.setattr(
+        "tilik_agent.evals.runner.argument_correctness_metric", lambda *_: _CapturingMetric(argument_cases)
+    )
+    _score_question("berapa TPT", _DummyJudge())
+
+    tools = argument_cases[0].tools_called
+    assert [(call.name, call.input_parameters) for call in tools] == [
+        ("search_datasets", {"query": "TPT Agustus 2025"})
+    ]
+    trajectory = task_cases[0]._trace_dict
+    assert isinstance(trajectory, dict)
+
+    def span_names(span: dict[str, Any]) -> list[str]:
+        return [span.get("name", "")] + [name for child in span["children"] for name in span_names(child)]
+
+    assert "search_datasets" in span_names(trajectory)
 
 
 def test_loaded_config_enables_the_three_metrics() -> None:

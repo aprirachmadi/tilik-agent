@@ -84,8 +84,8 @@ def _task_score(
         raise RuntimeError("task completion was scored while disabled")
     case = LLMTestCase(input=question, actual_output=result.answer or "")
     trace = _trace(handler)
-    if trace is not None:
-        case._trace_dict = trace_manager.get_trace_dict(trace)
+    if trace is not None and trace.root_spans:
+        case._trace_dict = _trajectory(trace)
     metric.measure(case)
     return ItemScore("task_completion", float(metric.score), metric.reason or "", "NUMERIC")
 
@@ -108,9 +108,13 @@ def _progress(message: str) -> None:
 
 
 def _trace(handler: CallbackHandler | None) -> Any:
-    if handler is None or not handler.trace_uuid:
-        return None
-    return trace_manager.get_trace_by_uuid(handler.trace_uuid)
+    # trace_manager forgets a trace once its last span ends, so read the handler's own reference.
+    return handler._trace if handler is not None else None
+
+
+def _trajectory(trace: Any) -> dict[str, Any]:
+    spans = [trace_manager.create_nested_spans_dict(span) for span in trace.root_spans]
+    return spans[0] if len(spans) == 1 else {"name": "question", "children": spans}
 
 
 def _run_published(dataset: BenchmarkDataset, judge: YamlJudge | None) -> str:
