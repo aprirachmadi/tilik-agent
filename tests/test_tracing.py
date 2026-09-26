@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 import pytest
@@ -11,8 +12,10 @@ from tilik_agent.agent.schemas import PlanStep
 from tilik_agent.agent.sql import _sql_step_once
 from tilik_agent.agent.tracing import (
     TraceBinding,
+    _extra_callbacks,
     _handler,
     _trace,
+    bind_trace_context,
     call_with_trace_context,
     current_callbacks,
 )
@@ -76,6 +79,42 @@ def test_worker_gets_its_own_langfuse_handler(monkeypatch: pytest.MonkeyPatch) -
         assert seen["callbacks"][0].trace_context["trace_id"] == binding.trace_id
         assert current_callbacks()[0] is parent_handler
     finally:
+        _handler.reset(handler_token)
+        _trace.reset(trace_token)
+
+
+def test_bound_trace_context_reaches_the_worker(monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    Condition:
+    A question trace and an extra callback are bound on the parent thread, then the snapshot runs in a pool worker.
+
+    Expected:
+    The worker sees that trace and the extra callback.
+    """
+
+    class _Handler:
+        def __init__(self, *, trace_context: dict[str, str]) -> None:
+            self.trace_context = trace_context
+
+    monkeypatch.setattr("tilik_agent.agent.tracing.CallbackHandler", _Handler)
+    binding = TraceBinding(trace_id="c" * 32, parent_span_id="d" * 16)
+    extra = _Sentinel()
+    trace_token = _trace.set(binding)
+    handler_token = _handler.set(_Sentinel())
+    extra_token = _extra_callbacks.set((extra,))
+    seen: dict[str, Any] = {}
+
+    def read_callbacks() -> None:
+        seen["callbacks"] = current_callbacks()
+
+    job = bind_trace_context(read_callbacks)
+    try:
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            list(pool.map(lambda bound: bound(), [job]))
+        assert seen["callbacks"][0].trace_context["trace_id"] == binding.trace_id
+        assert extra in seen["callbacks"]
+    finally:
+        _extra_callbacks.reset(extra_token)
         _handler.reset(handler_token)
         _trace.reset(trace_token)
 

@@ -14,7 +14,7 @@ from tilik_agent.agent.retrieval import _retrieve_step
 from tilik_agent.agent.runtime import compact_json, evidence_rows, model_json
 from tilik_agent.agent.schemas import Analysis, PlanStep, State, WorkPlan
 from tilik_agent.agent.sql import _sql_step
-from tilik_agent.agent.tracing import call_with_trace_context
+from tilik_agent.agent.tracing import bind_trace_context
 
 
 def plan_question(state: State) -> dict[str, Any]:
@@ -132,12 +132,14 @@ def _execute_plan(state: State) -> dict[str, Any]:
                 return step.id, _retrieve_step(step, state["question"], context if step.depends_on else "")
             return step.id, _calculate_step(step, aggregate)
 
-        # Independent steps run concurrently; dependent steps enter a later wave.
-        def run_step(step: PlanStep) -> tuple[str, dict[str, Any]]:
-            return call_with_trace_context(execute, step)
+        # Snapshot the question trace here. The pool worker does not inherit it.
+        jobs = [bind_trace_context(execute, step) for step in ready]
+
+        def run_job(job: Any) -> tuple[str, dict[str, Any]]:
+            return job()
 
         with ThreadPoolExecutor(max_workers=min(2, len(ready))) as pool:
-            results = list(pool.map(run_step, ready))
+            results = list(pool.map(run_job, jobs))
         for step_id, result in results:
             _merge_result(aggregate, result)
             step = pending.pop(step_id)

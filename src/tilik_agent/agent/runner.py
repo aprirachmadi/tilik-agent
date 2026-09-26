@@ -27,8 +27,11 @@ class QuestionResult:
     retrieval_error: str | None = None
 
 
+_TRACE_NODES = frozenset({"agent", "tools"})
+
+
 def stream_question(question: str, *, callbacks: Sequence[Any] | None = None) -> Iterator[dict[str, Any]]:
-    """Stream graph updates for one question.
+    """Stream graph updates for one question, including each inner SQL step.
 
     ``callbacks`` is how the benchmark attaches its own observer. The API and the
     notebook leave it empty. This function does not score the answer.
@@ -41,22 +44,33 @@ def stream_question(question: str, *, callbacks: Sequence[Any] | None = None) ->
         if active:
             config["callbacks"] = active
         state: State = {"question": question}
-        for update in graph.stream(state, config=config, stream_mode="updates"):
-            for payload in update.values():
-                if isinstance(payload, dict):
-                    state.update(payload)
+        for item in graph.stream(state, config=config, stream_mode=["updates", "custom"]):
+            mode, update = _stream_item(item)
+            if mode == "updates":
+                _merge_state(state, update)
             yield update
         if span is not None:
             span.update(output=state.get("answer"))
+
+
+def _stream_item(item: Any) -> tuple[str, dict[str, Any]]:
+    if isinstance(item, tuple) and len(item) == 2 and item[0] in {"updates", "custom"}:
+        return item
+    return "updates", item
+
+
+def _merge_state(state: State, update: dict[str, Any]) -> None:
+    for node_name, payload in update.items():
+        if node_name in _TRACE_NODES or not isinstance(payload, dict):
+            continue
+        state.update(payload)
 
 
 def run_question(question: str, *, callbacks: Sequence[Any] | None = None) -> QuestionResult:
     """Stream one question and return the merged state."""
     state: State = {"question": question}
     for update in stream_question(question, callbacks=callbacks):
-        for payload in update.values():
-            if isinstance(payload, dict):
-                state.update(payload)
+        _merge_state(state, update)
     return QuestionResult(
         answer=state.get("answer"),
         chart=state.get("chart"),

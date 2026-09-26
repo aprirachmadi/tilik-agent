@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
+from tilik_agent.agent.runner import run_question, stream_question
 from tilik_agent.api import app
 from tilik_agent.config import get_agent_config
 
@@ -16,7 +17,7 @@ class _Graph:
         assert state["question"] == "berapa"
         assert config["recursion_limit"] == get_agent_config().graph.recursion_limit
         assert "callbacks" not in config
-        assert stream_mode == "updates"
+        assert stream_mode == ["updates", "custom"]
         yield {
             "write_answer": {
                 "answer": "Papua 6,96",
@@ -35,6 +36,31 @@ class _Graph:
                 }
             }
         }
+
+
+def test_stream_question_yields_inner_sql_updates(monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    Condition:
+    The graph emits inner SQL updates and then an answer.
+
+    Expected:
+    The stream yields the SQL turns, and the returned answer stays the written answer.
+    """
+
+    class _Graph:
+        def stream(self, state: dict[str, Any], config: dict[str, Any], stream_mode: list[str]) -> Any:
+            yield ("custom", {"agent": {"messages": ["lookup"]}})
+            yield ("custom", {"tools": {"messages": ["rows"]}})
+            yield ("updates", {"write_answer": {"answer": "Papua 6,96"}})
+
+    monkeypatch.setattr("tilik_agent.agent.runner.compile_graph", lambda: _Graph())
+    monkeypatch.setattr("tilik_agent.agent.tracing.langfuse_configured", lambda: False)
+    assert list(stream_question("berapa")) == [
+        {"agent": {"messages": ["lookup"]}},
+        {"tools": {"messages": ["rows"]}},
+        {"write_answer": {"answer": "Papua 6,96"}},
+    ]
+    assert run_question("berapa").answer == "Papua 6,96"
 
 
 def test_questions_returns_answer_and_chart(monkeypatch: pytest.MonkeyPatch) -> None:

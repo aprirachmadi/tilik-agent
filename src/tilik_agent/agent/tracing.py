@@ -49,15 +49,27 @@ def current_callbacks() -> list[Any]:
     return callbacks
 
 
-def call_with_trace_context(func: Any, /, *args: Any) -> Any:
-    """Run ``func`` on a copied context with a fresh Langfuse handler for this thread."""
+def bind_trace_context(func: Any, /, *args: Any) -> Any:
+    """Snapshot the caller context. The returned callable runs ``func`` inside it.
+
+    Capture this on the thread that owns the question trace. A pool worker starts
+    with an empty context, so copying inside the worker drops the eval callback.
+    """
     context = copy_context()
 
-    def run() -> Any:
-        _handler.set(None)
-        return func(*args)
+    def invoke() -> Any:
+        def run() -> Any:
+            _handler.set(None)
+            return func(*args)
 
-    return context.run(run)
+        return context.run(run)
+
+    return invoke
+
+
+def call_with_trace_context(func: Any, /, *args: Any) -> Any:
+    """Run ``func`` in the caller's context with a fresh Langfuse handler."""
+    return bind_trace_context(func, *args)()
 
 
 @contextmanager

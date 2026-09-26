@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, TypedDict
 
 import pytest
+from langchain_core.messages import AIMessage, ToolMessage
 from langgraph.errors import GraphRecursionError
-from langgraph.graph import END, START
+from langgraph.graph import END, START, MessagesState, StateGraph
 from pydantic import ValidationError
 
 from tilik_agent.agent.answer import _check_calculation, build_chart, chart_needed, validate_analysis, write_answer
@@ -23,6 +25,11 @@ from tilik_agent.agent.sql import (
 )
 from tilik_agent.agent.workers import _execute_plan, plan_question, route_sources
 from tilik_agent.config import get_agent_config
+
+
+class _ParentState(TypedDict, total=False):
+    question: str
+    result: dict[str, Any]
 
 
 def _observation(observation_id: int, value: float | None) -> dict[str, Any]:
@@ -593,6 +600,70 @@ def test_harvest_tool_message_records_a_tool_error_and_ignores_an_unknown_tool()
     _harvest_tool_message(SimpleNamespace(name="other", content='{"rows": []}'), ctx)
     assert ctx["errors"] == ["get_observations: timeout"]
     assert ctx["observations"] == []
+
+
+def test_sql_step_publishes_each_inner_update(monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    Condition:
+    The inner SQL agent emits an agent turn and a tool turn, and a stream writer is installed.
+
+    Expected:
+    Both updates are published in order, each tagged with its plan step.
+    """
+    published: list[dict[str, Any]] = []
+
+    class _Agent:
+        def stream(self, state: dict[str, Any], config: dict[str, Any], stream_mode: str) -> Any:
+            yield {"agent": {"messages": ["lookup"]}}
+            yield {"tools": {"messages": [SimpleNamespace(name="search_datasets", content="[]")]}}
+
+    monkeypatch.setattr("tilik_agent.agent.sql.get_sql_agent", lambda: _Agent())
+    monkeypatch.setattr("tilik_agent.agent.sql.get_stream_writer", lambda: published.append)
+    _sql_step_once(WorkPlan.model_validate(_plan("sql_lookup")).steps[0], "berapa TPT")
+    assert [(list(update), next(iter(update.values()))["step_id"]) for update in published] == [
+        (["agent"], "s1"),
+        (["tools"], "s1"),
+    ]
+
+
+def test_sql_step_inside_a_graph_node_streams_inner_updates(monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    Condition:
+    A real SQL agent graph with agent and tools nodes runs inside a node of a parent graph that streams
+    updates and custom events.
+
+    Expected:
+    The parent receives node-keyed agent and tool events tagged with the step, and the tool rows are harvested.
+    """
+    rows = json.dumps({"dataset_id": 7, "measure_id": 1, "rows": [{"observation_id": 1, "value": 6.96}]})
+
+    def agent(state: MessagesState) -> dict[str, Any]:
+        return {"messages": [AIMessage(content="lookup")]}
+
+    def tools(state: MessagesState) -> dict[str, Any]:
+        return {"messages": [ToolMessage(content=rows, name="get_observations", tool_call_id="c1")]}
+
+    inner = StateGraph(MessagesState)
+    inner.add_node("agent", agent)
+    inner.add_node("tools", tools)
+    inner.add_edge(START, "agent")
+    inner.add_edge("agent", "tools")
+    inner.add_edge("tools", END)
+    monkeypatch.setattr("tilik_agent.agent.sql.get_sql_agent", lambda: inner.compile())
+    step = WorkPlan.model_validate(_plan("sql_lookup")).steps[0]
+
+    def run_sql(state: _ParentState) -> _ParentState:
+        return {"result": _sql_step_once(step, state["question"])}
+
+    outer = StateGraph(_ParentState)
+    outer.add_node("run_sql", run_sql)
+    outer.add_edge(START, "run_sql")
+    outer.add_edge("run_sql", END)
+    items = list(outer.compile().stream({"question": "berapa TPT"}, stream_mode=["updates", "custom"]))
+    custom = [(list(chunk), next(iter(chunk.values()))["step_id"]) for mode, chunk in items if mode == "custom"]
+    assert custom == [(["agent"], "s1"), (["tools"], "s1")]
+    result = next(chunk["run_sql"]["result"] for mode, chunk in items if mode == "updates")
+    assert [row["observation_id"] for row in result["observations"]] == [1]
 
 
 def test_sql_step_puts_partial_tool_errors_on_warnings(monkeypatch: pytest.MonkeyPatch) -> None:

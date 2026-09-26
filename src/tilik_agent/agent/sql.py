@@ -8,8 +8,10 @@ from typing import Any
 
 import psycopg
 from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.runnables.config import var_child_runnable_config
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
+from langgraph.config import get_stream_writer
 from langgraph.errors import GraphRecursionError
 from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
@@ -413,6 +415,10 @@ def _sql_step_once(step: PlanStep, question: str, dependency: str = "") -> dict[
     config = get_agent_config()
     max_tool_rounds = config.dataset_lookup.max_tool_rounds
     recursion_limit = config.graph.recursion_limit
+    publish = _parent_stream_writer()
+    # A graph inheriting the parent's runnable config runs as a subgraph, and LangGraph
+    # then forces "values" mode, which hides the per-node updates harvested below.
+    parent_config = var_child_runnable_config.set(None)
     try:
         stream_config: dict[str, Any] = {"recursion_limit": recursion_limit}
         callbacks = current_callbacks()
@@ -424,6 +430,7 @@ def _sql_step_once(step: PlanStep, question: str, dependency: str = "") -> dict[
             stream_mode="updates",
         ):
             for node_name, payload in update.items():
+                publish({node_name: {**payload, "step_id": step.id}})
                 for message in payload.get("messages", []):
                     if node_name == "tools":
                         _harvest_tool_message(message, ctx)
@@ -436,6 +443,8 @@ def _sql_step_once(step: PlanStep, question: str, dependency: str = "") -> dict[
         ctx["errors"].append(f"SQL graph recursion limit ({recursion_limit}) reached")
     except (psycopg.Error, ConnectionError, TimeoutError, OSError, APIError) as exc:
         ctx["errors"].append(f"SQL source error: {exc}")
+    finally:
+        var_child_runnable_config.reset(parent_config)
     observations: list[dict[str, Any]] = ctx["observations"]
     errors: list[str] = ctx["errors"]
     if observations and errors:
@@ -451,6 +460,14 @@ def _sql_step_once(step: PlanStep, question: str, dependency: str = "") -> dict[
         "sql_error": "; ".join(errors),
         "sql_warnings": "",
     }
+
+
+def _parent_stream_writer() -> Any:
+    """Return the question graph's stream writer, or a no-op outside a running graph."""
+    try:
+        return get_stream_writer()
+    except RuntimeError:
+        return lambda _: None
 
 
 def _sql_step(step: PlanStep, question: str, dependency: str = "") -> dict[str, Any]:
