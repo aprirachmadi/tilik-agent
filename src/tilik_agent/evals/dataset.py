@@ -7,7 +7,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
-_DATASET_PATH = Path(__file__).parent / "datasets" / "bps_questions.json"
+_DATASET_PATH = Path(__file__).parent / "datasets" / "demografi_sosial_questions.json"
 
 
 class BenchmarkItem(BaseModel):

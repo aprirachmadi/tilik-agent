@@ -14,7 +14,7 @@ def sync_benchmark(client: Any, dataset: BenchmarkDataset) -> list[Any]:
     try:
         client.get_dataset(dataset.name)
     except Exception:
-        client.create_dataset(name=dataset.name, description="BPS question benchmark")
+        client.create_dataset(name=dataset.name, description="Demography and social statistics benchmark")
     created: list[Any] = []
     for item in dataset.items:
         created.append(

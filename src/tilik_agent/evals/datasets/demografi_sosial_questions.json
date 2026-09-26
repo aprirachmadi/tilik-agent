@@ -1,0 +1,86 @@
+{
+  "name": "demografi-sosial-questions",
+  "version": "2026-09-26",
+  "items": [
+    {
+      "id": "1",
+      "input": "Berapa jumlah penduduk perempuan di Provinsi Jawa Barat pada 2025?"
+    },
+    {
+      "id": "2",
+      "input": "Berapa perubahan kepadatan penduduk DKI Jakarta dari 2024 ke 2025 menurut tabel kependudukan BPS?"
+    },
+    {
+      "id": "3",
+      "input": "Di antara provinsi dengan rasio jenis kelamin di atas 100 pada 2025, provinsi mana yang memiliki jumlah penduduk terbesar? Sebutkan jumlah penduduk dan rasio jenis kelaminnya."
+    },
+    {
+      "id": "4",
+      "input": "Berapa Tingkat Pengangguran Terbuka (TPT) Provinsi Aceh pada Agustus 2025?"
+    },
+    {
+      "id": "5",
+      "input": "Berapa selisih TPT Provinsi Jawa Barat antara Februari dan Agustus 2025, dan pada bulan mana nilainya lebih tinggi?"
+    },
+    {
+      "id": "6",
+      "input": "Provinsi mana saja yang memiliki tiga TPT tertinggi pada Agustus 2025, dan berapa Angka Partisipasi Sekolah kelompok umur 16–18 tahun di masing-masing provinsi tersebut pada 2025?"
+    },
+    {
+      "id": "7",
+      "input": "Berapa Angka Partisipasi Sekolah kelompok umur 7–12 tahun di Provinsi Aceh pada 2025?"
+    },
+    {
+      "id": "8",
+      "input": "Berapa selisih rata-rata lama sekolah penduduk usia 15 tahun ke atas antara laki-laki dan perempuan di Indonesia pada 2025?"
+    },
+    {
+      "id": "9",
+      "input": "Di antara provinsi yang memiliki data rata-rata lama sekolah pada 2023 dan 2025, provinsi mana yang mencatat kenaikan terbesar? Berapa Angka Partisipasi Sekolah kelompok umur 16–18 tahun di provinsi itu pada 2025?"
+    },
+    {
+      "id": "10",
+      "input": "Berapa persentase penduduk usia 15–24 tahun di DKI Jakarta yang merokok dalam sebulan terakhir pada 2025?"
+    },
+    {
+      "id": "11",
+      "input": "Berapa selisih angka harapan hidup perempuan dan laki-laki di Provinsi Jawa Barat pada 2024?"
+    },
+    {
+      "id": "12",
+      "input": "Provinsi mana yang memiliki selisih angka harapan hidup perempuan dan laki-laki terbesar pada 2024, dan berapa nilai kedua angka harapan hidup tersebut?"
+    },
+    {
+      "id": "13",
+      "input": "Berapa indeks Gini daerah perkotaan Indonesia pada Maret 2025?"
+    },
+    {
+      "id": "14",
+      "input": "Pada Maret 2025, berapa selisih persentase penduduk miskin antara wilayah perkotaan dan perdesaan di Provinsi Aceh?"
+    },
+    {
+      "id": "15",
+      "input": "Dari Maret 2024 ke Maret 2025, bagaimana perubahan persentase penduduk miskin perkotaan Indonesia dan indeks Gini perkotaan Indonesia? Apakah keduanya bergerak ke arah yang sama?"
+    },
+    {
+      "id": "16",
+      "input": "Berapa realisasi jumlah keluarga penerima manfaat bantuan sosial pangan di Provinsi Aceh pada 2024?"
+    },
+    {
+      "id": "17",
+      "input": "Provinsi mana yang memiliki selisih terbesar antara rencana dan realisasi jumlah keluarga penerima manfaat bantuan sosial pangan pada 2024? Di provinsi itu, berapa persentase realisasi anggaran terhadap rencana anggarannya?"
+    },
+    {
+      "id": "18",
+      "input": "Berapa persentase rumah tangga di Provinsi Bali yang memiliki akses sanitasi layak pada 2025?"
+    },
+    {
+      "id": "19",
+      "input": "Berapa selisih persentase rumah tangga dengan akses sanitasi layak antara perkotaan dan perdesaan di Provinsi Jawa Barat pada 2025?"
+    },
+    {
+      "id": "20",
+      "input": "Pada 2025, tiga provinsi mana yang memiliki kesenjangan terbesar antara akses sumber air minum layak dan akses sanitasi layak di perdesaan? Berapa kesenjangan dalam poin persentase di masing-masing provinsi?"
+    }
+  ]
+}

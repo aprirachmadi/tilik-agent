@@ -50,12 +50,12 @@ def test_benchmark_file_contains_the_notebook_question() -> None:
     The packaged question file is loaded.
 
     Expected:
-    It contains the notebook question id and no expected answer field.
+    It holds the twenty numbered demography and social questions, including the notebook question as item 6.
     """
     dataset = load_benchmark()
-    assert dataset.name == "bps-questions"
-    assert dataset.items[0].id == "q006-tpt-aps"
-    assert "TPT" in dataset.items[0].input
+    assert dataset.name == "demografi-sosial-questions"
+    assert [item.id for item in dataset.items] == [str(number) for number in range(1, 21)]
+    assert "TPT" in dataset.items[5].input
 
 
 def test_benchmark_rejects_an_item_without_input() -> None:
@@ -66,7 +66,7 @@ def test_benchmark_rejects_an_item_without_input() -> None:
     Expected:
     Validation fails.
     """
-    payload = {"name": "bps-questions", "version": "1", "items": [{"id": "q1"}]}
+    payload = {"name": "demografi-sosial-questions", "version": "1", "items": [{"id": "1"}]}
     with pytest.raises(ValidationError):
         parse_benchmark(payload)
 
@@ -169,10 +169,10 @@ def test_sync_upserts_question_ids_and_archives_removals() -> None:
 
     client = _Client()
     created = sync_benchmark(client, dataset)
-    assert created[0].id == "q006-tpt-aps"
-    assert client.calls[0]["id"] == "q006-tpt-aps"
-    assert client.calls[1]["id"] == "old-question"
-    assert getattr(client.calls[1]["status"], "value", client.calls[1]["status"]) == "ARCHIVED"
+    assert created[0].id == "1"
+    assert client.calls[0]["id"] == "1"
+    archived = next(call for call in client.calls if call["id"] == "old-question")
+    assert getattr(archived["status"], "value", archived["status"]) == "ARCHIVED"
 
 
 def test_loaded_config_enables_the_three_metrics() -> None:
