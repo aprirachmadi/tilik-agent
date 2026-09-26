@@ -31,7 +31,7 @@ def run_benchmark() -> str:
     if metrics.task_completion.enabled or metrics.argument_correctness.enabled:
         judge = YamlJudge(config.evals.judge)
     if not langfuse_configured():
-        rows = [(item.id, _score_question(item.input, judge)[1]) for item in dataset.items]
+        rows = [(item.id, _score_question(item.question, judge)[1]) for item in dataset.items]
         return format_report(rows) + "\n\nLangfuse upload skipped"
     return _run_published(dataset, judge)
 

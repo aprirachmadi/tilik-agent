@@ -55,13 +55,14 @@ def test_benchmark_file_contains_the_notebook_question() -> None:
     dataset = load_benchmark()
     assert dataset.name == "demografi-sosial-questions"
     assert [item.id for item in dataset.items] == [str(number) for number in range(1, 21)]
-    assert "TPT" in dataset.items[5].input
+    assert "TPT" in dataset.items[5].question
+    assert dataset.items[5].expected_response is None
 
 
-def test_benchmark_rejects_an_item_without_input() -> None:
+def test_benchmark_rejects_an_item_without_question() -> None:
     """
     Condition:
-    A question file item has an id and no input.
+    A question file item has an id and no question.
 
     Expected:
     Validation fails.
@@ -69,6 +70,22 @@ def test_benchmark_rejects_an_item_without_input() -> None:
     payload = {"name": "demografi-sosial-questions", "version": "1", "items": [{"id": "1"}]}
     with pytest.raises(ValidationError):
         parse_benchmark(payload)
+
+
+def test_expected_response_defaults_to_none() -> None:
+    """
+    Condition:
+    A question item omits expected_response.
+
+    Expected:
+    The loaded item keeps that field empty.
+    """
+    payload = {
+        "name": "demografi-sosial-questions",
+        "version": "1",
+        "items": [{"id": "1", "question": "Berapa jumlah penduduk?"}],
+    }
+    assert parse_benchmark(payload).items[0].expected_response is None
 
 
 def test_disabled_argument_metric_is_omitted() -> None:

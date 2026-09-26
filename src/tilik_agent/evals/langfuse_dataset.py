@@ -21,7 +21,8 @@ def sync_benchmark(client: Any, dataset: BenchmarkDataset) -> list[Any]:
             client.create_dataset_item(
                 dataset_name=dataset.name,
                 id=item.id,
-                input=item.input,
+                input=item.question,
+                expected_output=item.expected_response,
                 metadata={"benchmark_id": item.id, "version": dataset.version},
             )
         )

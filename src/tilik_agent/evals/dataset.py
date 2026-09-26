@@ -11,12 +11,13 @@ _DATASET_PATH = Path(__file__).parent / "datasets" / "demografi_sosial_questions
 
 
 class BenchmarkItem(BaseModel):
-    """One question. Expected answers stay absent until ground truth exists."""
+    """One benchmark question. ``expected_response`` stays empty until a ground-truth answer exists."""
 
     model_config = ConfigDict(extra="forbid")
 
     id: str = Field(min_length=1)
-    input: str = Field(min_length=1)
+    question: str = Field(min_length=1)
+    expected_response: str | None = None
 
 
 class BenchmarkDataset(BaseModel):
