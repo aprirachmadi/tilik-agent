@@ -1,126 +1,60 @@
+# Tilik
+
+Tilik answers a question about BPS statistics from published observations and the SP2020 demography publication. It does not search the web.
+
+## Pipeline
+
+`compile_graph()` in `tilik_agent.agent` builds this graph. A question enters at `plan_question`. The planner returns a short work plan whose steps are `sql_lookup`, `retrieve_sp2020`, or `calculate`.
+
 ```mermaid
 flowchart TD
-  START([START])
-  route{{route_question}}
-  retrieve[retrieve]
-  web_search[web_search]
-  grade[grade_documents]
-  decide{{decide_to_generate}}
-  rewrite[rewrite]
-  generate[generate]
-  END([END])
-
-  START --> route
-  route -->|"SP2020 demography"| retrieve
-  route -->|"anything else"| web_search
-  retrieve --> grade
-  grade --> decide
-  decide -->|"docs kept"| generate
-  decide -->|"empty, rewrites &lt; 2"| rewrite
-  decide -->|"empty, rewrite cap"| generate
-  rewrite --> retrieve
-  web_search --> generate
-  generate --> END
+  startNode[START] --> plan_question
+  plan_question -->|context| run_retrieval
+  plan_question -->|data| run_sql
+  plan_question -->|both| run_both
+  plan_question -->|limited| write_answer
+  run_retrieval --> write_answer
+  run_sql --> write_answer
+  run_both --> write_answer
+  write_answer -->|yes| build_chart
+  write_answer -->|no| endNode[END]
+  build_chart --> endNode
 ```
 
+- `data` runs SQL lookups only. `context` searches the SP2020 publication only. `both` runs the plan's mix of those steps. `limited` means the plan could not be validated, so the run goes straight to an answer that says so.
+- `sql_lookup` is an inner tool agent. It may call `search_datasets`, `describe_dataset`, and `get_observations`. The connection uses the read-only `sql_agent` role. Values are harvested from the tool results. The agent's own reply is only a status.
+- `retrieve_sp2020` searches the pgvector collection, grades each excerpt, and rewrites the query up to `retrieval.max_rewrites` times.
+- `calculate` proposes arithmetic over observation ids. The result is checked against the stored values before it is kept.
+- `write_answer` writes the user-facing answer from the gathered evidence. `build_chart` adds a `ChartSpec` when the question asks for a comparison and at least two cited values exist. The graph returns that spec. It does not open a figure.
 
-How to run qdrant
-You install **two different things**:
+The notebook in `notebooks/test_e2e_agent.ipynb` streams the same graph and draws the chart with Plotly. `POST /questions` returns the merged state, including `chart`, for a frontend to draw.
 
-1. **Qdrant server** — the database (Docker, binary, or cloud).  
-2. **`qdrant-client`** — already in your `pyproject.toml`; install with `poetry install` when you’re ready.
+`ChartSpec` fields are `type` (`bar` or `line`), `title`, `x_axis`, `y_axis`, and `data`. Each point has `label`, `series`, `value`, `unit`, and `observation_id`.
 
-The server is **not** installed via Poetry.
+## Run a question
 
----
-
-## Option A — Docker (usual for local dev on Windows)
-
-**Prerequisites:** [Docker Desktop](https://www.docker.com/products/docker-desktop/) running.
+Install dependencies and set `.env` from `.env.example`. Postgres must be up, with the observation tables loaded and the SP2020 collection embedded. `SQL_AGENT_PASSWORD` is the password for the read-only role.
 
 ```powershell
-docker pull qdrant/qdrant
-docker run -p 6333:6333 -p 6334:6334 `
-  -v "${PWD}/qdrant_storage:/qdrant/storage" `
-  qdrant/qdrant
+poetry run tilik serve
 ```
 
-- **REST API:** `http://localhost:6333`  
-- **Dashboard:** open `http://localhost:6333/dashboard` in a browser  
-- Data persists in `./qdrant_storage` on the host (path is relative to where you run the command).
-
-Stop with `Ctrl+C` or `docker stop <container_id>`.
-
-**Named container (restart easily):**
+The API listens on `http://127.0.0.1:4321`. In PowerShell, `--%` keeps the JSON quotes intact:
 
 ```powershell
-docker run -d --name qdrant `
-  -p 6333:6333 -p 6334:6334 `
-  -v qdrant_storage:/qdrant/storage `
-  qdrant/qdrant
+curl.exe --% -s -X POST http://127.0.0.1:4321/questions -H "Content-Type: application/json" -d "{\"question\": \"Provinsi mana saja yang memiliki tiga TPT tertinggi pada Agustus 2025, dan berapa Angka Partisipasi Sekolah kelompok umur 16-18 tahun di masing-masing provinsi tersebut pada 2025?\"}"
 ```
 
----
+The body contains `answer`, `chart`, `answer_observation_ids`, `answer_document_ids`, `step_status`, and the error or warning fields `plan_error`, `sql_error`, `sql_warnings`, and `retrieval_error`.
 
-## Option B — Docker Compose (good for a repo)
+## Configuration
 
-Create `docker-compose.yml` at the repo root:
+`configs/default.yaml` holds the chat model, embedding model, retrieval limits, dataset-lookup caps, and `graph.recursion_limit`. Editing the file is picked up by the running process. The chat client and SQL agent are rebuilt when the `llm` block changes. The vector store is rebuilt when the embedding model, collection, or connection string changes.
 
-```yaml
-services:
-  qdrant:
-    image: qdrant/qdrant:latest
-    ports:
-      - "6333:6333"
-      - "6334:6334"
-    volumes:
-      - qdrant_storage:/qdrant/storage
+These environment variables override the yaml when they are set: `TILIK_MODEL`, `TILIK_LLM_BASE_URL`, `SP2020_COLLECTION`.
 
-volumes:
-  qdrant_storage:
-```
+The API key stays in `.env`. The yaml `llm.api_key_env` value names that variable. The default is `OPENAI_API_KEY`. `PGVECTOR_CONNECTION` overrides the pgvector URL. `POSTGRES_HOST`, `POSTGRES_PORT`, and `POSTGRES_DB` select the observation database.
 
-Then:
+## Ingest
 
-```powershell
-docker compose up -d
-```
-
----
-
-## Option C — Qdrant Cloud
-
-Sign up at [https://cloud.qdrant.io](https://cloud.qdrant.io), create a cluster, use the URL + API key. Set env vars, e.g. `QDRANT_URL` and `QDRANT_API_KEY`.
-
----
-
-## Connect from Python (after server is up)
-
-```python
-from qdrant_client import QdrantClient
-
-client = QdrantClient(url="http://localhost:6333")
-print(client.get_collections())
-```
-
-With LangChain (once deps are installed):
-
-```python
-from langchain_qdrant import QdrantVectorStore
-
-# vectorstore = QdrantVectorStore.from_documents(..., url="http://localhost:6333", ...)
-```
-
----
-
-## Quick check
-
-```powershell
-curl http://localhost:6333/collections
-```
-
-You should get JSON (often an empty `collections` list).
-
----
-
-**Summary:** Run **`qdrant/qdrant` in Docker** on ports **6333/6334**; use **`poetry install`** only for the Python client. If Docker isn’t an option on your machine, say so and we can outline the Windows native binary path (Docker is still what most people use).
+`poetry run tilik ingest catalog` loads the national BPS subject catalog. `poetry run tilik ingest run` loads every catalogued table. `poetry run tilik ingest table --id <bps-table-id>` loads one table. Ingest uses `BPS_API_KEY` and `database_url` from settings, which is separate from the read-only `sql_agent` role used by questions.
