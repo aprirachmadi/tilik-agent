@@ -31,9 +31,22 @@ def run_benchmark() -> str:
     if metrics.task_completion.enabled or metrics.argument_correctness.enabled:
         judge = YamlJudge(config.evals.judge)
     if not langfuse_configured():
-        rows = [(item.id, _score_question(item.question, judge)[1]) for item in dataset.items]
+        _progress(f"Scoring {len(dataset.items)} questions")
+        rows = []
+        for item in dataset.items:
+            _, scores = _score_item(item.id, item.question, judge)
+            rows.append((item.id, scores))
         return format_report(rows) + "\n\nLangfuse upload skipped"
     return _run_published(dataset, judge)
+
+
+def _score_item(
+    item_id: str, question: str, judge: YamlJudge | None
+) -> tuple[QuestionResult, list[ItemScore]]:
+    _progress(f"[{item_id}] {question}")
+    result, scores = _score_question(question, judge)
+    _progress(format_report([(item_id, scores)]))
+    return result, scores
 
 
 def _score_question(question: str, judge: YamlJudge | None) -> tuple[QuestionResult, list[ItemScore]]:
@@ -43,7 +56,10 @@ def _score_question(question: str, judge: YamlJudge | None) -> tuple[QuestionRes
     if judge is not None:
         handler = CallbackHandler(name="tilik-eval")
         callbacks = [handler]
+    _progress("  answering")
     result = run_question(question, callbacks=callbacks)
+    if judge is not None:
+        _progress("  judging")
     task_score = _task_score(question, result, handler, judge) if metrics.task_completion.enabled else None
     argument_score = (
         _argument_score(question, handler, judge) if metrics.argument_correctness.enabled else None
@@ -87,6 +103,10 @@ def _argument_score(question: str, handler: CallbackHandler | None, judge: YamlJ
     return ItemScore("argument_correctness", float(metric.score), metric.reason or "", "NUMERIC")
 
 
+def _progress(message: str) -> None:
+    print(message, flush=True)
+
+
 def _trace(handler: CallbackHandler | None) -> Any:
     if handler is None or not handler.trace_uuid:
         return None
@@ -96,13 +116,16 @@ def _trace(handler: CallbackHandler | None) -> Any:
 def _run_published(dataset: BenchmarkDataset, judge: YamlJudge | None) -> str:
     from langfuse import get_client
 
+    _progress("Connecting to Langfuse")
     client = get_client()
+    _progress("Syncing the question file")
     remote_items = sync_benchmark(client, dataset)
+    _progress(f"Scoring {len(dataset.items)} questions")
     captured: dict[str, list[ItemScore]] = {}
 
     def task(*, item: Any, **kwargs: Any) -> str:
         question = item.input if isinstance(item.input, str) else str(item.input)
-        result, scores = _score_question(question, judge)
+        result, scores = _score_item(item.id, question, judge)
         captured[item.id] = scores
         captured[question] = scores
         return result.answer or ""
