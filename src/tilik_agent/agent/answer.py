@@ -13,6 +13,7 @@ from tilik_agent.agent.runtime import (
     document_index,
     evidence_rows,
     evidence_source_details,
+    history_block,
     model_json,
     observation_index,
 )
@@ -144,17 +145,6 @@ def display_chart_spec(chart: dict[str, Any] | None) -> None:
     figure.show()
 
 
-def _conversation_block(state: State) -> str:
-    history = state.get("history") or []
-    if not history:
-        return ""
-    lines = [
-        f"{'User' if turn['role'] == 'user' else 'Assistant'}: {turn['content']}"
-        for turn in history[-6:]
-    ]
-    return "Conversation so far:\n" + "\n".join(lines) + "\n\n"
-
-
 def _answer_prompt(state: State) -> str:
     direct = state.get("source_route") == "direct"
     direct_rule = (
@@ -174,7 +164,7 @@ If a unit is missing, explain a likely unit only when the source context
 supports it, and make clear that it is inferred.
 Do not assert causality from side-by-side tables.
 Return an AnswerDraft with evidence IDs in its ID fields, not its text field.
-{direct_rule}{_conversation_block(state)}Question: {state['question']}
+{direct_rule}{history_block(state.get('history'), 'Conversation so far')}Question: {state['question']}
 Plan: {compact_json(state.get('plan', {}))}
 Step status: {compact_json(state.get('step_status', {}))}
 Observations: {compact_json(evidence_rows(state.get('observations', [])))}

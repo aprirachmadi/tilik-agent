@@ -9,8 +9,6 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from tilik_agent.ingestion.models import Base
 
-HISTORY_MESSAGE_LIMIT = 6
-
 
 class Conversation(Base):
     """One chat thread in the UI."""

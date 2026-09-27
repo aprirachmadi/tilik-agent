@@ -27,6 +27,11 @@ dataset_lookup:
 graph:
   recursion_limit: 25
 
+conversation:
+  # Most recent user and assistant messages sent to the planner and answer writer.
+  # 6 messages = the last 3 turns.
+  max_history_messages: 6
+
 evals:
   judge:
     model: qwen3.8-flash

@@ -11,24 +11,10 @@ from pydantic import ValidationError
 
 from tilik_agent.agent.answer import validate_analysis
 from tilik_agent.agent.retrieval import _retrieve_step
-from tilik_agent.agent.runtime import compact_json, evidence_rows, model_json
+from tilik_agent.agent.runtime import compact_json, evidence_rows, history_block, model_json
 from tilik_agent.agent.schemas import Analysis, PlanStep, State, WorkPlan
 from tilik_agent.agent.sql import _sql_step
 from tilik_agent.agent.tracing import bind_trace_context
-
-_HISTORY_TURN_LIMIT = 6
-
-
-def _history_block(history: list[dict[str, str]] | None) -> str:
-    if not history:
-        return ""
-    recent = history[-_HISTORY_TURN_LIMIT:]
-    lines = [
-        f"{'User' if turn['role'] == 'user' else 'Assistant'}: {turn['content']}"
-        for turn in recent
-    ]
-    return "Recent conversation:\n" + "\n".join(lines) + "\n\n"
-
 
 def plan_question(state: State) -> dict[str, Any]:
     original_question = state.get("original_question") or state["question"]
@@ -48,7 +34,7 @@ into a full question with place, indicator, and period.
 Return steps: [] when the latest message needs no new BPS SQL or SP2020 lookup
 (greetings, who are you, or confirming numbers already stated in the conversation).
 When steps is empty, requested_chart must be false.
-{_history_block(history)}Latest user message: {original_question}"""
+{history_block(history, "Recent conversation")}Latest user message: {original_question}"""
     error = ""
     for attempt in range(2):
         try:

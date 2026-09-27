@@ -105,6 +105,15 @@ def _parse_json_object(text: str) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+def history_block(history: list[dict[str, str]] | None, header: str) -> str:
+    """Render the most recent conversation messages for a prompt."""
+    if not history:
+        return ""
+    recent = history[-get_agent_config().conversation.max_history_messages :]
+    lines = [f"{'User' if turn['role'] == 'user' else 'Assistant'}: {turn['content']}" for turn in recent]
+    return f"{header}:\n" + "\n".join(lines) + "\n\n"
+
+
 def compact_json(value: Any) -> str:
     # Keep complete JSON; slicing previously hid valid observations.
     return json.dumps(value, ensure_ascii=False, default=str)

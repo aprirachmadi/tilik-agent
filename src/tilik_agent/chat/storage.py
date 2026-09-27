@@ -7,7 +7,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from tilik_agent.agent.schemas import ChatTurn
-from tilik_agent.chat.models import HISTORY_MESSAGE_LIMIT, Conversation, Message
+from tilik_agent.chat.models import Conversation, Message
+from tilik_agent.config import get_agent_config
 
 
 def ensure_conversation(session: Session, conversation_id: str | None) -> str:
@@ -30,7 +31,7 @@ def load_history(session: Session, conversation_id: str) -> list[ChatTurn]:
         select(Message)
         .where(Message.conversation_id == conversation_id)
         .order_by(Message.id.desc())
-        .limit(HISTORY_MESSAGE_LIMIT)
+        .limit(get_agent_config().conversation.max_history_messages)
     ).all()
     turns: list[ChatTurn] = [{"role": row.role, "content": row.content} for row in reversed(rows)]
     return turns

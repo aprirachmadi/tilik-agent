@@ -18,7 +18,7 @@ from typing import Any
 
 import yaml
 from dotenv import load_dotenv
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -28,10 +28,21 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     bps_api_key: str = ""
-    database_url: str = "postgresql+psycopg://tilik:tilik@localhost:5432/tilik"
+    postgres_host: str = "localhost"
+    postgres_port: int = 5432
+    postgres_db: str = "tilik"
+    database_url: str = ""
     bps_raw_dir: Path = Path("data/bps/raw")
     bps_domain: str = "0000"
     bps_subcat: int = 514
+
+    @model_validator(mode="after")
+    def default_database_url(self) -> Settings:
+        if not self.database_url:
+            self.database_url = (
+                f"postgresql+psycopg://tilik:tilik@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
+            )
+        return self
 
 
 class LlmConfig(BaseModel):
@@ -87,6 +98,14 @@ class GraphConfig(BaseModel):
     recursion_limit: int
 
 
+class ConversationConfig(BaseModel):
+    """Multi-turn chat settings."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    max_history_messages: int
+
+
 class JudgeMetricConfig(BaseModel):
     """One LLM-as-a-judge metric. ``enabled`` false skips it for that benchmark."""
 
@@ -133,6 +152,7 @@ class AgentConfig(BaseModel):
     retrieval: RetrievalConfig
     dataset_lookup: DatasetLookupConfig
     graph: GraphConfig
+    conversation: ConversationConfig
     evals: EvalsConfig
 
 
