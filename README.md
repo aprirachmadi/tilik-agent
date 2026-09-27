@@ -118,6 +118,22 @@ flowchart TD
 | `write_answer` | Writes the answer from the gathered evidence. |
 | `build_chart` | Adds a chart spec when the question asks for a comparison and at least two cited values exist. The graph returns the spec and does not open a figure. |
 
+### Dataset search
+
+`search_datasets` splits the query into words, lowercased and separated at anything that is not a letter or digit. A four-digit word is treated as a year. Every other word is matched on its own against the dataset title and its measure names, so a query does not need to match a title as one phrase.
+
+Each dataset gets 2 points for every word found in its title, and 1 point for every word found only in its measure names. Datasets with no points are left out. The rest are ordered by:
+
+1. Parsed datasets first.
+2. Higher score.
+3. Datasets with an observation in a requested year.
+4. Shorter title, because it is usually the more specific table.
+5. Dataset id.
+
+The first `dataset_lookup.max_search_results` rows are returned, and `truncated` is true when that limit is reached. A query that is only a year returns nothing, because years only rank results.
+
+All words count the same. Weighting rare words more (IDF) was tried on the benchmark questions, and it did worse: rare words such as "nasional" pulled in unrelated tables. Words that never appear in a title, such as English terms or region names like "Jakarta", do not match.
+
 ## Ask a question
 
 `POST /questions` with a JSON body. The server streams the graph and returns the merged state.
