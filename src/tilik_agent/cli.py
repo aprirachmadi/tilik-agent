@@ -74,7 +74,7 @@ def _load(*, table_id: str | None) -> IngestReport:
 
 @app.command("eval")
 def evaluate() -> None:
-    """Score the question file. This command is the only place the judges run."""
+    """Score every question in the question file with the judges."""
     from tilik_agent.evals.runner import run_benchmark
 
     typer.echo(run_benchmark())

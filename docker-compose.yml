@@ -2,7 +2,7 @@ services:
   postgres:
     image: pgvector/pgvector:pg16
     ports:
-      - "5431:5431"
+      - "5431:5432"
     environment:
       POSTGRES_USER: tilik
       POSTGRES_PASSWORD: tilik
