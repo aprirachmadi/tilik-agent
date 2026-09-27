@@ -18,7 +18,7 @@ from tilik_agent.agent.sql import SQL_TOOLS, get_sql_agent
 from tilik_agent.agent.tracing import langfuse_configured
 from tilik_agent.config import get_agent_config
 from tilik_agent.evals.dataset import BenchmarkDataset, load_benchmark
-from tilik_agent.evals.judge import YamlJudge
+from tilik_agent.evals.judge import AgentJudgeLlm
 from tilik_agent.evals.langfuse_dataset import sync_benchmark
 from tilik_agent.evals.metrics import argument_correctness_metric, task_completion_metric
 from tilik_agent.evals.scores import ItemScore, assemble_scores, format_report
@@ -41,7 +41,7 @@ def run_benchmark() -> str:
 
 
 def _score_item(
-    item_id: str, question: str, judge: YamlJudge | None
+    item_id: str, question: str, judge: AgentJudgeLlm | None
 ) -> tuple[QuestionResult, list[ItemScore]]:
     _progress(f"[{item_id}] {question}")
     result, scores = score_question(question, judge)
@@ -49,16 +49,16 @@ def _score_item(
     return result, scores
 
 
-def build_judge() -> YamlJudge | None:
+def build_judge() -> AgentJudgeLlm | None:
     """Return the judge from ``evals.judge``, or none when both judge metrics are disabled."""
     config = get_agent_config()
     metrics = config.evals.metrics
     if metrics.task_completion.enabled or metrics.argument_correctness.enabled:
-        return YamlJudge(config.evals.judge)
+        return AgentJudgeLlm(config.evals.judge)
     return None
 
 
-def score_question(question: str, judge: YamlJudge | None) -> tuple[QuestionResult, list[ItemScore]]:
+def score_question(question: str, judge: AgentJudgeLlm | None) -> tuple[QuestionResult, list[ItemScore]]:
     """Answer one question and score it with the metrics enabled in ``evals.metrics``."""
     metrics = get_agent_config().evals.metrics
     handler = None
@@ -86,7 +86,7 @@ def score_question(question: str, judge: YamlJudge | None) -> tuple[QuestionResu
 
 
 def _task_score(
-    question: str, result: QuestionResult, handler: CallbackHandler | None, judge: YamlJudge | None
+    question: str, result: QuestionResult, handler: CallbackHandler | None, judge: AgentJudgeLlm | None
 ) -> ItemScore:
     if judge is None:
         raise RuntimeError("task completion was scored while disabled")
@@ -101,7 +101,7 @@ def _task_score(
     return ItemScore("task_completion", float(metric.score), metric.reason or "", "NUMERIC")
 
 
-def _argument_score(question: str, handler: CallbackHandler | None, judge: YamlJudge | None) -> ItemScore:
+def _argument_score(question: str, handler: CallbackHandler | None, judge: AgentJudgeLlm | None) -> ItemScore:
     if judge is None:
         raise RuntimeError("argument correctness was scored while disabled")
     metric = argument_correctness_metric(get_agent_config().evals.metrics, judge)
@@ -160,7 +160,7 @@ def _prune(span: dict[str, Any], nodes: set[str]) -> list[dict[str, Any]]:
     return [node]
 
 
-def _run_published(dataset: BenchmarkDataset, judge: YamlJudge | None) -> str:
+def _run_published(dataset: BenchmarkDataset, judge: AgentJudgeLlm | None) -> str:
     from langfuse import get_client
 
     _progress("Connecting to Langfuse")

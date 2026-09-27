@@ -24,7 +24,7 @@ from tilik_agent.config import (
     get_agent_config,
 )
 from tilik_agent.evals.dataset import load_benchmark, parse_benchmark
-from tilik_agent.evals.judge import YamlJudge
+from tilik_agent.evals.judge import AgentJudgeLlm
 from tilik_agent.evals.langfuse_dataset import sync_benchmark
 from tilik_agent.evals.metrics import argument_correctness_metric, task_completion_metric
 from tilik_agent.evals.runner import _prune, score_question
@@ -203,7 +203,7 @@ def test_pipeline_status_is_partial_when_steps_disagree() -> None:
     assert comment == "no rows"
 
 
-def test_yaml_judge_reads_the_evals_block(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_agent_judge_llm_reads_the_evals_block(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     Condition:
     A judge config names a model and an API key variable that is set.
@@ -212,7 +212,7 @@ def test_yaml_judge_reads_the_evals_block(monkeypatch: pytest.MonkeyPatch) -> No
     The DeepEval judge reports that model name.
     """
     monkeypatch.setenv("JUDGE_TEST_KEY", "test-key")
-    judge = YamlJudge(
+    judge = AgentJudgeLlm(
         LlmConfig(
             model="judge-model",
             base_url="https://example.test/v1",

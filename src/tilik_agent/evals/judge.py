@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from tilik_agent.config import LlmConfig
 
 
-class YamlJudge(DeepEvalBaseLLM):
+class AgentJudgeLlm(DeepEvalBaseLLM):
     """Chat client built only from ``evals.judge``."""
 
     def __init__(self, config: LlmConfig) -> None:
