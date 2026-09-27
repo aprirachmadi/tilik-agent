@@ -38,34 +38,59 @@ def get_connection() -> psycopg.Connection:
 def search_datasets(query: str) -> dict[str, Any]:
     """Find BPS datasets relevant to a topic or table identifier.
 
-    Search dataset titles and measure names; also accept an exact BPS
-    table code if the implementation supports it. Return a short list of
-    candidates with dataset.id, BPS table code, title, source/domain, and
-    parser status. Use this when the relevant dataset ID is unknown.
-    Search results are metadata and contain no published values.
+    Each word is matched separately against dataset titles and measure
+    names, and datasets matching more words rank first. A four-digit year
+    in the query ranks datasets with that period higher, so include the
+    year you need. Return a short list of candidates with dataset.id, BPS
+    table code, title, source/domain, and parser status. Use this when the
+    relevant dataset ID is unknown. Search results are metadata and contain
+    no published values.
 
     Args:
-        query: A topic, title fragment, measure name, or BPS table code.
+        query: Topic words, a title fragment, or a measure name, optionally with a year.
     """
-    term = query.strip()
-    if not term:
+    if not query.strip():
         return {"error": "Search query is empty"}
-    pattern = f"%{term}%"
     limit = get_agent_config().dataset_lookup.max_search_results
     with get_connection() as conn:
         rows = conn.execute(
             """
-            SELECT DISTINCT d.id, d.bps_table_id, d.tablesource,
-                   d.domain_id, d.title, d.parser_status
-            FROM dataset d
-            LEFT JOIN measure m ON m.dataset_id = d.id
-            WHERE d.title ILIKE %s
-               OR m.original_name ILIKE %s
-               OR m.canonical_name ILIKE %s
-            ORDER BY d.title
-            LIMIT %s
+            WITH tokens AS (
+                SELECT DISTINCT token
+                FROM regexp_split_to_table(lower(%(query)s), '[^[:alnum:]]+') AS token
+                WHERE token <> ''
+            ),
+            words AS (SELECT token AS word FROM tokens WHERE token !~ '^\\d{4}$'),
+            years AS (SELECT token AS year FROM tokens WHERE token ~ '^\\d{4}$'),
+            measure_text AS (
+                SELECT dataset_id, lower(string_agg(concat_ws(' ', original_name, canonical_name), ' ')) AS text
+                FROM measure
+                GROUP BY dataset_id
+            ),
+            scored AS (
+                SELECT d.id, d.bps_table_id, d.tablesource, d.domain_id, d.title, d.parser_status,
+                       sum(CASE WHEN lower(d.title) LIKE '%%' || w.word || '%%' THEN 2
+                                WHEN coalesce(mt.text, '') LIKE '%%' || w.word || '%%' THEN 1
+                                ELSE 0 END) AS score
+                FROM dataset d
+                LEFT JOIN measure_text mt ON mt.dataset_id = d.id
+                CROSS JOIN words w
+                GROUP BY d.id, d.bps_table_id, d.tablesource, d.domain_id, d.title, d.parser_status
+            )
+            SELECT s.id, s.bps_table_id, s.tablesource, s.domain_id, s.title, s.parser_status
+            FROM scored s
+            WHERE s.score > 0
+            ORDER BY s.parser_status = 'parsed' DESC,
+                     s.score DESC,
+                     EXISTS (
+                         SELECT 1 FROM observation o JOIN period p ON p.id = o.period_id
+                         WHERE o.dataset_id = s.id AND p.label IN (SELECT year FROM years)
+                     ) DESC,
+                     length(s.title),
+                     s.id
+            LIMIT %(limit)s
             """,
-            (pattern, pattern, pattern, limit),
+            {"query": query, "limit": limit},
         ).fetchall()
 
     return {
