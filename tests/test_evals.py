@@ -162,6 +162,32 @@ def test_disabled_metric_is_omitted_from_scores() -> None:
     assert scores[1].value == "succeeded"
 
 
+def test_pipeline_status_succeeds_when_no_lookup_was_needed() -> None:
+    """
+    Condition:
+    A direct answer finished without planned steps or a plan error.
+
+    Expected:
+    Pipeline status is succeeded with a no-lookup comment.
+    """
+    label, comment = pipeline_status_label({}, plan_error=None)
+    assert label == "succeeded"
+    assert comment == "No lookup was needed"
+
+
+def test_pipeline_status_fails_when_plan_error_and_no_steps() -> None:
+    """
+    Condition:
+    Planning failed before any step could run.
+
+    Expected:
+    Pipeline status stays failed and surfaces the plan error.
+    """
+    label, comment = pipeline_status_label({}, plan_error="Could not validate the work plan")
+    assert label == "failed"
+    assert comment == "Could not validate the work plan"
+
+
 def test_pipeline_status_is_partial_when_steps_disagree() -> None:
     """
     Condition:

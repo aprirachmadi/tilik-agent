@@ -61,7 +61,8 @@ flowchart TD
     PLAN -->|context| R[Run retrieval]
     PLAN -->|data| S[Run SQL lookup]
     PLAN -->|both| MIX[Run the planned mix]
-    PLAN -->|limited| ANSWER[Write a sourced answer]
+    PLAN -->|direct| ANSWER[Write a sourced answer]
+    PLAN -->|plan_failed| ANSWER
 
     MIX --> R
     MIX --> S
@@ -108,7 +109,8 @@ flowchart TD
 | `data` | SQL lookups only. |
 | `context` | SP2020 search only. |
 | `both` | The plan's mix of SQL lookups and SP2020 search. |
-| `limited` | The plan did not validate, so the run goes straight to an answer that says so. |
+| `direct` | No SQL or SP2020 lookup is needed; the answer writer responds from conversation and any gathered evidence. |
+| `plan_failed` | The plan did not validate, so the run goes straight to an answer that says so. |
 
 | Step | What it does |
 | --- | --- |

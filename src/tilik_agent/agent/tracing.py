@@ -73,7 +73,12 @@ def call_with_trace_context(func: Any, /, *args: Any) -> Any:
 
 
 @contextmanager
-def question_trace(question: str, extra_callbacks: Sequence[Any] | None = None) -> Iterator[Any]:
+def question_trace(
+    question: str,
+    extra_callbacks: Sequence[Any] | None = None,
+    *,
+    conversation_id: str | None = None,
+) -> Iterator[Any]:
     """Open one Langfuse span for ``question`` when keys are set, and always yield."""
     extra_token = _extra_callbacks.set(tuple(extra_callbacks or ()))
     try:
@@ -87,8 +92,15 @@ def question_trace(question: str, extra_callbacks: Sequence[Any] | None = None) 
 
         client = get_client()
         model_name = get_agent_config().llm.model
+        trace_attrs: dict[str, Any] = {
+            "trace_name": "question",
+            "tags": ["tilik"],
+            "metadata": {"model": model_name},
+        }
+        if conversation_id:
+            trace_attrs["session_id"] = conversation_id
         with client.start_as_current_observation(name="question", as_type="span", input=question) as span:
-            with propagate_attributes(trace_name="question", tags=["tilik"], metadata={"model": model_name}):
+            with propagate_attributes(**trace_attrs):
                 tokens = _bind_trace(client)
                 try:
                     yield span

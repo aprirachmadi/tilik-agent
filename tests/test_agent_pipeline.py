@@ -43,7 +43,7 @@ def _plan(*actions: str) -> dict[str, Any]:
         if action == "calculate":
             step["depends_on"] = [f"s{index - 1}"]
         steps.append(step)
-    return {"steps": steps, "requested_chart": True}
+    return {"question": "berapa TPT", "steps": steps, "requested_chart": True}
 
 
 @pytest.fixture
@@ -55,10 +55,11 @@ def calculation_rows() -> dict[int, dict[str, Any]]:
 @pytest.mark.parametrize(
     ("state", "expected"),
     [
-        ({"plan_error": "invalid", "source_route": "data"}, "limited"),
+        ({"plan_error": "invalid", "source_route": "data"}, "plan_failed"),
         ({"source_route": "context"}, "context"),
         ({"source_route": "data"}, "data"),
         ({"source_route": "both"}, "both"),
+        ({"source_route": "direct"}, "direct"),
     ],
 )
 def test_route_sources(state: dict[str, Any], expected: str) -> None:
@@ -67,7 +68,7 @@ def test_route_sources(state: dict[str, Any], expected: str) -> None:
     A planned state, including one whose plan failed validation.
 
     Expected:
-    A plan error routes to limited. Any other state keeps its source route.
+    A plan error routes to plan_failed. Any other state keeps its source route.
     """
     assert route_sources(state) == expected
 
@@ -101,6 +102,24 @@ def test_plan_question_sets_the_source_route(
     assert result["search_query"] == "berapa TPT"
 
 
+def test_plan_question_routes_direct_when_there_are_no_steps(monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    Condition:
+    The planner returns a valid work plan with no lookup steps.
+
+    Expected:
+    The source route is direct and charting is disabled.
+    """
+    monkeypatch.setattr(
+        "tilik_agent.agent.workers.model_json",
+        lambda schema, prompt: {"question": "Hi", "steps": [], "requested_chart": False},
+    )
+    result = plan_question({"question": "Hi"})
+    assert result["source_route"] == "direct"
+    assert result["requested_chart"] is False
+    assert result["plan"]["steps"] == []
+
+
 def test_plan_question_retries_once_then_keeps_the_valid_plan(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     Condition:
@@ -114,7 +133,7 @@ def test_plan_question_retries_once_then_keeps_the_valid_plan(monkeypatch: pytes
     def fake_model(schema: type[WorkPlan], prompt: str) -> dict[str, Any]:
         prompts.append(prompt)
         if len(prompts) == 1:
-            return {"steps": [{"id": "s1", "action": "calculate", "request": "add them"}]}
+            return {"question": "berapa TPT", "steps": [{"id": "s1", "action": "calculate", "request": "add them"}]}
         return _plan("sql_lookup")
 
     monkeypatch.setattr("tilik_agent.agent.workers.model_json", fake_model)
@@ -146,32 +165,35 @@ def test_plan_question_reports_a_plan_that_never_validates(monkeypatch: pytest.M
     [
         (
             {
+                "question": "lookup",
                 "steps": [
                     {"id": "s1", "action": "sql_lookup", "request": "lookup tpt"},
                     {"id": "s1", "action": "sql_lookup", "request": "lookup aps"},
-                ]
+                ],
             },
             "Step IDs must be unique",
         ),
         (
             {
+                "question": "lookup",
                 "steps": [
                     {"id": "s1", "action": "sql_lookup", "request": "lookup tpt", "depends_on": ["s1"]},
-                ]
+                ],
             },
             "Dependencies must refer to earlier steps",
         ),
         (
             {
+                "question": "lookup",
                 "steps": [
                     {"id": "s1", "action": "sql_lookup", "request": "lookup tpt"},
                     {"id": "s2", "action": "calculate", "request": "add the values", "depends_on": ["s1", "s1"]},
-                ]
+                ],
             },
             "Duplicate dependencies",
         ),
         (
-            {"steps": [{"id": "s1", "action": "calculate", "request": "add them"}]},
+            {"question": "calc", "steps": [{"id": "s1", "action": "calculate", "request": "add them"}]},
             "A calculation must depend on earlier evidence",
         ),
     ],
@@ -186,6 +208,18 @@ def test_work_plan_rejects_invalid_steps(payload: dict[str, Any], message: str) 
     """
     with pytest.raises(ValidationError, match=message):
         WorkPlan.model_validate(payload)
+
+
+def test_work_plan_accepts_an_empty_step_list() -> None:
+    """
+    Condition:
+    A work plan declares no lookup steps for a direct answer.
+
+    Expected:
+    Validation succeeds.
+    """
+    plan = WorkPlan.model_validate({"question": "Hi", "steps": [], "requested_chart": False})
+    assert plan.steps == []
 
 
 @pytest.mark.parametrize(

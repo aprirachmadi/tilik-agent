@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from tilik_agent.agent.graph import compile_graph
-from tilik_agent.agent.schemas import State
+from tilik_agent.agent.schemas import ChatTurn, State
 from tilik_agent.agent.tracing import current_callbacks, question_trace
 from tilik_agent.config import get_agent_config
 
@@ -22,6 +22,8 @@ class QuestionResult:
     answer_document_ids: list[str] = field(default_factory=list)
     step_status: dict[str, Any] = field(default_factory=dict)
     plan_error: str | None = None
+    standalone_question: str | None = None
+    source_route: str | None = None
     sql_error: str | None = None
     sql_warnings: str | None = None
     retrieval_error: str | None = None
@@ -30,7 +32,13 @@ class QuestionResult:
 _TRACE_NODES = frozenset({"agent", "tools"})
 
 
-def stream_question(question: str, *, callbacks: Sequence[Any] | None = None) -> Iterator[dict[str, Any]]:
+def stream_question(
+    question: str,
+    *,
+    history: Sequence[ChatTurn] | None = None,
+    conversation_id: str | None = None,
+    callbacks: Sequence[Any] | None = None,
+) -> Iterator[dict[str, Any]]:
     """Stream graph updates for one question, including each inner SQL step.
 
     ``callbacks`` is how the benchmark attaches its own observer. The API and the
@@ -38,12 +46,16 @@ def stream_question(question: str, *, callbacks: Sequence[Any] | None = None) ->
     """
     graph = compile_graph()
     limit = get_agent_config().graph.recursion_limit
-    with question_trace(question, callbacks) as span:
+    with question_trace(question, callbacks, conversation_id=conversation_id) as span:
         config: dict[str, Any] = {"recursion_limit": limit}
         active = current_callbacks()
         if active:
             config["callbacks"] = active
-        state: State = {"question": question}
+        state: State = {
+            "question": question,
+            "original_question": question,
+            "history": list(history or []),
+        }
         for item in graph.stream(state, config=config, stream_mode=["updates", "custom"]):
             mode, update = _stream_item(item)
             if mode == "updates":
@@ -66,10 +78,25 @@ def _merge_state(state: State, update: dict[str, Any]) -> None:
         state.update(payload)
 
 
-def run_question(question: str, *, callbacks: Sequence[Any] | None = None) -> QuestionResult:
+def run_question(
+    question: str,
+    *,
+    history: Sequence[ChatTurn] | None = None,
+    conversation_id: str | None = None,
+    callbacks: Sequence[Any] | None = None,
+) -> QuestionResult:
     """Stream one question and return the merged state."""
-    state: State = {"question": question}
-    for update in stream_question(question, callbacks=callbacks):
+    state: State = {
+        "question": question,
+        "original_question": question,
+        "history": list(history or []),
+    }
+    for update in stream_question(
+        question,
+        history=history,
+        conversation_id=conversation_id,
+        callbacks=callbacks,
+    ):
         _merge_state(state, update)
     return QuestionResult(
         answer=state.get("answer"),
@@ -78,6 +105,8 @@ def run_question(question: str, *, callbacks: Sequence[Any] | None = None) -> Qu
         answer_document_ids=state.get("answer_document_ids") or [],
         step_status=state.get("step_status") or {},
         plan_error=state.get("plan_error"),
+        standalone_question=state.get("question"),
+        source_route=state.get("source_route"),
         sql_error=state.get("sql_error"),
         sql_warnings=state.get("sql_warnings"),
         retrieval_error=state.get("retrieval_error"),
