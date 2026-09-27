@@ -50,6 +50,16 @@ The first boot of the Langfuse services creates the project `tilik`. Sign in at 
 
 `notebooks/test_e2e_agent.ipynb` streams the same graph and draws the chart with Plotly.
 
+The frontend is a Vite app in `frontend`. Start the API first, then:
+
+```powershell
+cd frontend
+npm install
+npm run dev
+```
+
+Open [http://localhost:5173](http://localhost:5173). The dev server proxies `/api` to the API on [http://127.0.0.1:4321](http://127.0.0.1:4321).
+
 ## Pipeline
 
 `compile_graph()` in `tilik_agent.agent` builds the graph below. `plan_question` returns a short plan whose steps are `sql_lookup`, `retrieve_sp2020`, or `calculate`. A `both` plan runs the retrieval and SQL loops. A calculation waits until the steps it depends on have finished.

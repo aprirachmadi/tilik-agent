@@ -1,0 +1,86 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Source Sans 3 Variable", "Source Sans 3", sans-serif;
+  --font-serif: "Source Serif 4 Variable", "Source Serif 4", "Palatino Linotype", Palatino, serif;
+  --color-canvas: #f4f0e8;
+  --color-elevated: #fbf8f3;
+  --color-user: #e9e2d6;
+  --color-ink: #1f1a16;
+  --color-ink-mid: #4a433c;
+  --color-ink-muted: #5c554c;
+  --color-line: #e3dcd0;
+  --color-grid: #ebe4d8;
+  --color-teal: #0d5c63;
+  --color-teal-press: #08484e;
+  --color-teal-wash: #e4f1f0;
+  --color-clay: #7a3b2a;
+  --color-clay-wash: #f8eee8;
+  --shadow-artifact: 0 1px 2px rgb(31 26 22 / 0.04), 0 12px 28px -16px rgb(31 26 22 / 0.18);
+  --shadow-float: 0 1px 2px rgb(31 26 22 / 0.05), 0 16px 36px -20px rgb(31 26 22 / 0.28);
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background: var(--color-canvas);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: 1rem;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  button,
+  textarea {
+    font: inherit;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-teal);
+    outline-offset: 2px;
+  }
+
+  textarea:focus,
+  textarea:focus-visible {
+    outline: none;
+  }
+
+  ::selection {
+    background: #d5ebe9;
+    color: var(--color-ink);
+  }
+
+  * {
+    scrollbar-color: #d5cec2 transparent;
+  }
+}
+
+@layer components {
+  .reading {
+    font-family: var(--font-serif);
+    line-height: 1.65;
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@keyframes status-breathe {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.status-dot {
+  animation: status-breathe 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .status-dot {
+    animation: none;
+  }
+}

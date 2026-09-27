@@ -93,9 +93,12 @@ def load_full_thread(session: Session, conversation_id: str) -> tuple[Conversati
     return conversation, messages
 
 
-def conversation_title_from_question(question: str, *, max_len: int = 80) -> str:
-    """Build a short title from the first user message."""
+def conversation_title_from_question(question: str, *, max_len: int = 240) -> str:
+    """Build a title from the first user message, breaking on a word when it must be shortened."""
     collapsed = " ".join(question.split())
     if len(collapsed) <= max_len:
         return collapsed
-    return collapsed[: max_len - 1].rstrip() + "…"
+    clipped = collapsed[:max_len].rsplit(" ", 1)[0].rstrip()
+    if not clipped:
+        clipped = collapsed[:max_len].rstrip()
+    return clipped + "…"
