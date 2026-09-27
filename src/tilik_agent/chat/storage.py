@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
+from typing import Any
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -45,6 +48,10 @@ def append_turn(
     assistant_content: str | None,
     standalone_question: str | None = None,
     trace_id: str | None = None,
+    chart: dict[str, Any] | None = None,
+    sources: list[dict[str, Any]] | None = None,
+    source_route: str | None = None,
+    chart_error: str | None = None,
 ) -> None:
     """Persist one user message and optional assistant reply."""
     session.add(Message(conversation_id=conversation_id, role="user", content=user_content))
@@ -56,9 +63,34 @@ def append_turn(
                 content=assistant_content,
                 standalone_question=standalone_question,
                 trace_id=trace_id,
+                chart=chart,
+                sources=sources or [],
+                source_route=source_route,
+                chart_error=chart_error,
             )
         )
+    conversation = session.get(Conversation, conversation_id)
+    if conversation is not None:
+        conversation.updated_at = datetime.now(UTC)
     session.commit()
+
+
+def list_conversations(session: Session) -> list[Conversation]:
+    """Return every thread, newest activity first."""
+    return list(
+        session.scalars(select(Conversation).order_by(Conversation.updated_at.desc(), Conversation.created_at.desc()))
+    )
+
+
+def load_full_thread(session: Session, conversation_id: str) -> tuple[Conversation, list[Message]] | None:
+    """Return one conversation and every message, or none when the id is unknown."""
+    conversation = session.get(Conversation, conversation_id)
+    if conversation is None:
+        return None
+    messages = list(
+        session.scalars(select(Message).where(Message.conversation_id == conversation_id).order_by(Message.id.asc()))
+    )
+    return conversation, messages
 
 
 def conversation_title_from_question(question: str, *, max_len: int = 80) -> str:

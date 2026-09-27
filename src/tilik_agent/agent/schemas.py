@@ -111,6 +111,7 @@ class State(TypedDict, total=False):
     step_status: dict[str, dict[str, Any]]
     intermediate_analysis: dict[str, Any]
     chart: dict[str, Any] | None
+    chart_error: str
     answer: str
     answer_observation_ids: list[int]
     answer_document_ids: list[str]

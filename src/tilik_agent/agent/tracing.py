@@ -33,6 +33,14 @@ def langfuse_configured() -> bool:
     return bool(os.getenv("LANGFUSE_PUBLIC_KEY") and os.getenv("LANGFUSE_SECRET_KEY"))
 
 
+def current_trace_id() -> str | None:
+    """Return the Langfuse trace id for the question in progress, if one is open."""
+    binding = _trace.get()
+    if binding is None:
+        return None
+    return binding.trace_id
+
+
 def current_callbacks() -> list[Any]:
     """Return the Langfuse handler for this thread plus any callbacks the caller added."""
     callbacks: list[Any] = []

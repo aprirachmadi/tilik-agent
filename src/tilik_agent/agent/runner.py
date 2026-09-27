@@ -8,7 +8,7 @@ from typing import Any
 
 from tilik_agent.agent.graph import compile_graph
 from tilik_agent.agent.schemas import ChatTurn, State
-from tilik_agent.agent.tracing import current_callbacks, question_trace
+from tilik_agent.agent.tracing import current_callbacks, current_trace_id, question_trace
 from tilik_agent.config import get_agent_config
 
 
@@ -27,6 +27,9 @@ class QuestionResult:
     sql_error: str | None = None
     sql_warnings: str | None = None
     retrieval_error: str | None = None
+    chart_error: str | None = None
+    trace_id: str | None = None
+    sources: list[dict[str, Any]] = field(default_factory=list)
 
 
 _TRACE_NODES = frozenset({"agent", "tools"})
@@ -78,26 +81,62 @@ def _merge_state(state: State, update: dict[str, Any]) -> None:
         state.update(payload)
 
 
-def run_question(
-    question: str,
-    *,
-    history: Sequence[ChatTurn] | None = None,
-    conversation_id: str | None = None,
-    callbacks: Sequence[Any] | None = None,
-) -> QuestionResult:
-    """Stream one question and return the merged state."""
-    state: State = {
+def initial_question_state(question: str, history: Sequence[ChatTurn] | None = None) -> State:
+    """Return the graph state for one user message."""
+    return {
         "question": question,
         "original_question": question,
         "history": list(history or []),
     }
-    for update in stream_question(
-        question,
-        history=history,
-        conversation_id=conversation_id,
-        callbacks=callbacks,
-    ):
-        _merge_state(state, update)
+
+
+def merge_question_update(state: State, update: dict[str, Any]) -> None:
+    """Fold one streamed graph update into ``state``."""
+    _merge_state(state, update)
+
+
+def cited_sources(state: State) -> list[dict[str, Any]]:
+    """Build the source chip from cited observation and document ids."""
+    observations = {
+        int(row["observation_id"]): row
+        for row in state.get("observations") or []
+        if row.get("observation_id") is not None
+    }
+    datasets = (state.get("source_details") or {}).get("datasets") or {}
+    sources: list[dict[str, Any]] = []
+    seen_datasets: set[int] = set()
+    for observation_id in state.get("answer_observation_ids") or []:
+        row = observations.get(int(observation_id))
+        if row is None:
+            continue
+        raw_dataset_id = row.get("dataset_id")
+        if raw_dataset_id is None:
+            continue
+        dataset_id = int(raw_dataset_id)
+        if dataset_id in seen_datasets:
+            continue
+        seen_datasets.add(dataset_id)
+        dataset = (datasets.get(str(dataset_id)) or {}).get("dataset") or {}
+        sources.append(
+            {
+                "kind": "dataset",
+                "dataset_id": dataset_id,
+                "bps_table_id": dataset.get("bps_table_id"),
+                "title": dataset.get("title"),
+            }
+        )
+    seen_documents: set[str] = set()
+    for document_id in state.get("answer_document_ids") or []:
+        key = str(document_id)
+        if key in seen_documents:
+            continue
+        seen_documents.add(key)
+        sources.append({"kind": "document", "document_id": key})
+    return sources
+
+
+def question_result(state: State, *, trace_id: str | None = None) -> QuestionResult:
+    """Copy the merged graph state into the object the API stores and returns."""
     return QuestionResult(
         answer=state.get("answer"),
         chart=state.get("chart"),
@@ -110,4 +149,28 @@ def run_question(
         sql_error=state.get("sql_error"),
         sql_warnings=state.get("sql_warnings"),
         retrieval_error=state.get("retrieval_error"),
+        chart_error=state.get("chart_error"),
+        trace_id=trace_id,
+        sources=cited_sources(state),
     )
+
+
+def run_question(
+    question: str,
+    *,
+    history: Sequence[ChatTurn] | None = None,
+    conversation_id: str | None = None,
+    callbacks: Sequence[Any] | None = None,
+) -> QuestionResult:
+    """Stream one question and return the merged state."""
+    state = initial_question_state(question, history)
+    trace_id: str | None = None
+    for update in stream_question(
+        question,
+        history=history,
+        conversation_id=conversation_id,
+        callbacks=callbacks,
+    ):
+        merge_question_update(state, update)
+        trace_id = current_trace_id() or trace_id
+    return question_result(state, trace_id=trace_id)
