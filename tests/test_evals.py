@@ -27,7 +27,7 @@ from tilik_agent.evals.dataset import load_benchmark, parse_benchmark
 from tilik_agent.evals.judge import YamlJudge
 from tilik_agent.evals.langfuse_dataset import sync_benchmark
 from tilik_agent.evals.metrics import argument_correctness_metric, task_completion_metric
-from tilik_agent.evals.runner import _score_question
+from tilik_agent.evals.runner import _prune, score_question
 from tilik_agent.evals.scores import ItemScore, assemble_scores, pipeline_status_label
 
 
@@ -249,7 +249,7 @@ def test_judges_receive_the_recorded_tool_calls_and_trajectory(monkeypatch: pyte
     monkeypatch.setattr(
         "tilik_agent.evals.runner.argument_correctness_metric", lambda *_: _CapturingMetric(argument_cases)
     )
-    _score_question("berapa TPT", _DummyJudge())
+    score_question("berapa TPT", _DummyJudge())
 
     tools = argument_cases[0].tools_called
     assert [(call.name, call.input_parameters) for call in tools] == [
@@ -258,10 +258,50 @@ def test_judges_receive_the_recorded_tool_calls_and_trajectory(monkeypatch: pyte
     trajectory = task_cases[0]._trace_dict
     assert isinstance(trajectory, dict)
 
-    def span_names(span: dict[str, Any]) -> list[str]:
-        return [span.get("name", "")] + [name for child in span["children"] for name in span_names(child)]
+    assert tools[0].description and tools[0].output
+    assert trajectory["input"] == "berapa TPT"
 
-    assert "search_datasets" in span_names(trajectory)
+    def spans(span: dict[str, Any]) -> list[dict[str, Any]]:
+        return [span] + [node for child in span.get("children", []) for node in spans(child)]
+
+    names = [span["name"] for span in spans(trajectory)]
+    assert not any(name.startswith(("ChannelWrite", "RunnableSequence", "__start__")) for name in names)
+    tool_span = next(span for span in spans(trajectory) if span["name"] == "search_datasets")
+    assert tool_span["description"] and tool_span["output"]
+
+
+def test_prune_hoists_plumbing_and_drops_repeated_inputs() -> None:
+    """
+    Condition:
+    A span tree has a plumbing span wrapping a graph node, which holds an LLM span and a tool span.
+
+    Expected:
+    The plumbing span is replaced by its children, the node and LLM keep only their output,
+    and the tool keeps its input, output, and description.
+    """
+    tree = {
+        "name": "RunnableSequence",
+        "type": "base",
+        "input": "state",
+        "output": "state",
+        "children": [
+            {
+                "name": "agent",
+                "type": "base",
+                "input": "state",
+                "output": "delta",
+                "children": [
+                    {"name": "ChatOpenAI", "type": "llm", "input": "history", "output": "reply", "model": "m"},
+                    {"name": "search_datasets", "type": "tool", "input": {"query": "x"}, "output": "rows"},
+                ],
+            }
+        ],
+    }
+    [node] = _prune(tree, {"agent"})
+    assert node["name"] == "agent" and "input" not in node and node["output"] == "delta"
+    llm, tool_span = node["children"]
+    assert llm == {"name": "ChatOpenAI", "type": "llm", "model": "m", "output": "reply"}
+    assert tool_span["input"] == {"query": "x"} and tool_span["output"] == "rows" and tool_span["description"]
 
 
 def test_loaded_config_enables_the_three_metrics() -> None:

@@ -303,9 +303,11 @@ After the necessary tool calls, give only a short completion status. Do not
 write a user-facing report or repeat the observation values.""")
 
 
+SQL_TOOLS = [search_datasets, describe_dataset, get_observations]
+
+
 def build_agent(chat_model: ChatOpenAI):
-    sql_tools = [search_datasets, describe_dataset, get_observations]
-    llm_with_tools = chat_model.bind_tools(sql_tools)
+    llm_with_tools = chat_model.bind_tools(SQL_TOOLS)
 
     def agent_node(state: MessagesState) -> dict[str, Any]:
         response = llm_with_tools.invoke([SQL_SYSTEM_PROMPT, *state["messages"]])
@@ -313,7 +315,7 @@ def build_agent(chat_model: ChatOpenAI):
 
     sql_graph = StateGraph(MessagesState)
     sql_graph.add_node("agent", agent_node)
-    sql_graph.add_node("tools", ToolNode(sql_tools))
+    sql_graph.add_node("tools", ToolNode(SQL_TOOLS))
     sql_graph.add_edge(START, "agent")
     sql_graph.add_conditional_edges("agent", tools_condition, {"tools": "tools", END: END})
     sql_graph.add_edge("tools", "agent")

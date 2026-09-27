@@ -1,7 +1,7 @@
 """Run the question file through the agent and score the enabled metrics.
 
 This module is the only place that calls the judges. ``run_question`` stays a
-normal question call.
+normal question call. ``score_question`` scores a single question.
 """
 
 from __future__ import annotations
@@ -12,7 +12,9 @@ from deepeval.integrations.langchain import CallbackHandler
 from deepeval.test_case import LLMTestCase
 from deepeval.tracing import trace_manager
 
+from tilik_agent.agent.graph import compile_graph
 from tilik_agent.agent.runner import QuestionResult, run_question
+from tilik_agent.agent.sql import SQL_TOOLS, get_sql_agent
 from tilik_agent.agent.tracing import langfuse_configured
 from tilik_agent.config import get_agent_config
 from tilik_agent.evals.dataset import BenchmarkDataset, load_benchmark
@@ -21,15 +23,13 @@ from tilik_agent.evals.langfuse_dataset import sync_benchmark
 from tilik_agent.evals.metrics import argument_correctness_metric, task_completion_metric
 from tilik_agent.evals.scores import ItemScore, assemble_scores, format_report
 
+_TOOL_DESCRIPTIONS = {tool.name: tool.description for tool in SQL_TOOLS}
+
 
 def run_benchmark() -> str:
     """Score every question in the JSON file and upload the run when Langfuse is configured."""
     dataset = load_benchmark()
-    config = get_agent_config()
-    metrics = config.evals.metrics
-    judge = None
-    if metrics.task_completion.enabled or metrics.argument_correctness.enabled:
-        judge = YamlJudge(config.evals.judge)
+    judge = build_judge()
     if not langfuse_configured():
         _progress(f"Scoring {len(dataset.items)} questions")
         rows = []
@@ -44,12 +44,22 @@ def _score_item(
     item_id: str, question: str, judge: YamlJudge | None
 ) -> tuple[QuestionResult, list[ItemScore]]:
     _progress(f"[{item_id}] {question}")
-    result, scores = _score_question(question, judge)
+    result, scores = score_question(question, judge)
     _progress(format_report([(item_id, scores)]))
     return result, scores
 
 
-def _score_question(question: str, judge: YamlJudge | None) -> tuple[QuestionResult, list[ItemScore]]:
+def build_judge() -> YamlJudge | None:
+    """Return the judge from ``evals.judge``, or none when both judge metrics are disabled."""
+    config = get_agent_config()
+    metrics = config.evals.metrics
+    if metrics.task_completion.enabled or metrics.argument_correctness.enabled:
+        return YamlJudge(config.evals.judge)
+    return None
+
+
+def score_question(question: str, judge: YamlJudge | None) -> tuple[QuestionResult, list[ItemScore]]:
+    """Answer one question and score it with the metrics enabled in ``evals.metrics``."""
     metrics = get_agent_config().evals.metrics
     handler = None
     callbacks = None
@@ -58,6 +68,7 @@ def _score_question(question: str, judge: YamlJudge | None) -> tuple[QuestionRes
         callbacks = [handler]
     _progress("  answering")
     result = run_question(question, callbacks=callbacks)
+    _progress(f"  answer:\n{result.answer}")
     if judge is not None:
         _progress("  judging")
     task_score = _task_score(question, result, handler, judge) if metrics.task_completion.enabled else None
@@ -85,7 +96,7 @@ def _task_score(
     case = LLMTestCase(input=question, actual_output=result.answer or "")
     trace = _trace(handler)
     if trace is not None and trace.root_spans:
-        case._trace_dict = _trajectory(trace)
+        case._trace_dict = _trajectory(question, result.answer, trace)
     metric.measure(case)
     return ItemScore("task_completion", float(metric.score), metric.reason or "", "NUMERIC")
 
@@ -97,7 +108,8 @@ def _argument_score(question: str, handler: CallbackHandler | None, judge: YamlJ
     if metric is None:
         raise RuntimeError("argument correctness was scored while disabled")
     trace = _trace(handler)
-    tools = list(trace.tools_called or []) if trace is not None else []
+    calls = (trace.tools_called or []) if trace is not None else []
+    tools = [call.model_copy(update={"description": _TOOL_DESCRIPTIONS.get(call.name)}) for call in calls]
     case = LLMTestCase(input=question, actual_output="", tools_called=tools)
     metric.measure(case)
     return ItemScore("argument_correctness", float(metric.score), metric.reason or "", "NUMERIC")
@@ -112,9 +124,40 @@ def _trace(handler: CallbackHandler | None) -> Any:
     return handler._trace if handler is not None else None
 
 
-def _trajectory(trace: Any) -> dict[str, Any]:
-    spans = [trace_manager.create_nested_spans_dict(span) for span in trace.root_spans]
-    return spans[0] if len(spans) == 1 else {"name": "question", "children": spans}
+def _trajectory(question: str, answer: str | None, trace: Any) -> dict[str, Any]:
+    """Return the trace as DeepEval's span tree without LangGraph's repeated state.
+
+    Graph node spans carry the whole accumulated state as input, and plumbing spans
+    repeat it again, so only the new data on each span is kept. Nothing is clipped.
+    """
+    nodes = (set(compile_graph().nodes) | set(get_sql_agent().nodes)) - {"__start__"}
+    children = [
+        node
+        for span in trace.root_spans
+        for child in trace_manager.create_nested_spans_dict(span).get("children", [])
+        for node in _prune(child, nodes)
+    ]
+    return {"name": "question", "type": "agent", "input": question, "output": answer or "", "children": children}
+
+
+def _prune(span: dict[str, Any], nodes: set[str]) -> list[dict[str, Any]]:
+    """Return the span with only its new data, or its pruned children when it is plumbing."""
+    children = [node for child in span.get("children") or [] for node in _prune(child, nodes)]
+    span_type, name = span.get("type"), span.get("name")
+    if span_type == "tool":
+        fields = {"input": span.get("input"), "output": span.get("output"), "description": _TOOL_DESCRIPTIONS.get(name)}
+    elif span_type == "retriever":
+        fields = {"input": span.get("input"), "output": span.get("output")}
+    elif span_type == "llm":
+        fields = {"model": span.get("model"), "output": span.get("output")}
+    elif name in nodes:
+        fields = {"output": span.get("output")}
+    else:
+        return children
+    node = {"name": name, "type": span_type, **{key: value for key, value in fields.items() if value is not None}}
+    if children:
+        node["children"] = children
+    return [node]
 
 
 def _run_published(dataset: BenchmarkDataset, judge: YamlJudge | None) -> str:
