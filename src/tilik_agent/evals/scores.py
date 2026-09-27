@@ -23,7 +23,9 @@ class ItemScore:
 def pipeline_status_label(step_status: dict[str, Any], plan_error: str | None = None) -> tuple[str, str]:
     """Summarize planned steps as succeeded, partial, or failed."""
     if not step_status:
-        return "failed", plan_error or "No planned steps finished"
+        if plan_error:
+            return "failed", plan_error
+        return "succeeded", "No lookup was needed"
     labels = [str(item.get("status", "failed")) for item in step_status.values()]
     errors = [str(item.get("error")) for item in step_status.values() if item.get("error")]
     if all(label == "succeeded" for label in labels):

@@ -16,9 +16,23 @@ from tilik_agent.agent.schemas import Analysis, PlanStep, State, WorkPlan
 from tilik_agent.agent.sql import _sql_step
 from tilik_agent.agent.tracing import bind_trace_context
 
+_HISTORY_TURN_LIMIT = 6
+
+
+def _history_block(history: list[dict[str, str]] | None) -> str:
+    if not history:
+        return ""
+    recent = history[-_HISTORY_TURN_LIMIT:]
+    lines = [
+        f"{'User' if turn['role'] == 'user' else 'Assistant'}: {turn['content']}"
+        for turn in recent
+    ]
+    return "Recent conversation:\n" + "\n".join(lines) + "\n\n"
+
 
 def plan_question(state: State) -> dict[str, Any]:
-    question = state["question"]
+    original_question = state.get("original_question") or state["question"]
+    history = state.get("history") or []
     prompt = f"""Plan source work for a BPS statistics assistant. Return a WorkPlan.
 Allowed actions: sql_lookup, retrieve_sp2020, calculate. No web lookup exists.
 SQL has BPS observation tables; retrieve_sp2020 has only the SP2020 demography
@@ -28,12 +42,28 @@ dataset lookups in ONE sql_lookup step; prefer that for a SQL-only question.
 Do not create calculate steps when the SQL agent can select a ranking as part
 of its lookup. Use calculate for arithmetic needed between independent lookups.
 Never assume that a document search can provide a missing SQL value.
-Question: {question}"""
+Set WorkPlan.question to a standalone version of the latest user message. When
+recent conversation is present, resolve follow-ups such as "what about 2024?"
+into a full question with place, indicator, and period.
+Return steps: [] when the latest message needs no new BPS SQL or SP2020 lookup
+(greetings, who are you, or confirming numbers already stated in the conversation).
+When steps is empty, requested_chart must be false.
+{_history_block(history)}Latest user message: {original_question}"""
     error = ""
     for attempt in range(2):
         try:
             plan = model_json(WorkPlan, prompt if attempt == 0 else prompt + f"\nPrevious invalid plan: {error}")
             plan = WorkPlan.model_validate(plan)
+            standalone = plan.question.strip() or original_question
+            if not plan.steps:
+                return {
+                    "original_question": original_question,
+                    "question": standalone,
+                    "plan": plan.model_dump(),
+                    "source_route": "direct",
+                    "requested_chart": False,
+                    "search_query": standalone,
+                }
             actions = {step.action for step in plan.steps}
             route: Literal["context", "data", "both"] = (
                 "both"
@@ -43,19 +73,21 @@ Question: {question}"""
                 else "data"
             )
             return {
+                "original_question": original_question,
+                "question": standalone,
                 "plan": plan.model_dump(),
                 "source_route": route,
                 "requested_chart": plan.requested_chart,
-                "search_query": question,
+                "search_query": standalone,
             }
         except (ValidationError, ValueError, json.JSONDecodeError, APIError) as exc:
             error = str(exc)
     return {"plan_error": f"Could not validate the work plan: {error}"}
 
 
-def route_sources(state: State) -> Literal["context", "data", "both", "limited"]:
+def route_sources(state: State) -> Literal["context", "data", "both", "direct", "plan_failed"]:
     if state.get("plan_error"):
-        return "limited"
+        return "plan_failed"
     return state["source_route"]
 
 

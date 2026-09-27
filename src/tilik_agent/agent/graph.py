@@ -27,7 +27,13 @@ def compile_graph() -> CompiledStateGraph:
     graph.add_conditional_edges(
         "plan_question",
         route_sources,
-        {"context": "run_retrieval", "data": "run_sql", "both": "run_both", "limited": "write_answer"},
+        {
+            "context": "run_retrieval",
+            "data": "run_sql",
+            "both": "run_both",
+            "direct": "write_answer",
+            "plan_failed": "write_answer",
+        },
     )
     for source_node in ("run_retrieval", "run_sql", "run_both"):
         graph.add_edge(source_node, "write_answer")

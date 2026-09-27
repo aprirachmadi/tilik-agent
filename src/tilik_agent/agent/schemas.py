@@ -17,11 +17,14 @@ class PlanStep(BaseModel):
 
 
 class WorkPlan(BaseModel):
-    steps: list[PlanStep] = Field(min_length=1, max_length=8)
+    question: str = Field(min_length=1)
+    steps: list[PlanStep] = Field(default_factory=list, max_length=8)
     requested_chart: bool = False
 
     @model_validator(mode="after")
     def validate_steps(self) -> WorkPlan:
+        if not self.steps:
+            return self
         ids = [step.id for step in self.steps]
         if len(ids) != len(set(ids)):
             raise ValueError("Step IDs must be unique")
@@ -82,11 +85,21 @@ class AnswerDraft(BaseModel):
     document_ids: list[str] = Field(default_factory=list)
 
 
+ChatRole = Literal["user", "assistant"]
+
+
+class ChatTurn(TypedDict):
+    role: ChatRole
+    content: str
+
+
 class State(TypedDict, total=False):
     question: str
+    original_question: str
+    history: list[ChatTurn]
     search_query: str
     plan: dict[str, Any]
-    source_route: Literal["context", "data", "both"]
+    source_route: Literal["context", "data", "both", "direct"]
     requested_chart: bool
     plan_error: str
     documents: list[dict[str, Any]]
