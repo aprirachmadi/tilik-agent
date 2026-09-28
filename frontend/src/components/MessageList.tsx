@@ -60,38 +60,51 @@ export function MessageList({ messages, status, onRetry }: MessageListProps) {
           .slice(0, index)
           .reverse()
           .find((item) => item.role === "user")?.content;
+        const notices = otherNotices(message);
+        const hasNotes = !message.pending && (Boolean(message.planError) || notices.length > 0 || Boolean(message.sqlWarnings));
         return (
-          <li key={message.key} className="space-y-4">
+          <li key={message.key} className="space-y-7">
             {message.pending && last && status ? (
-              <p className="flex items-center gap-2 text-sm text-ink-mid" role="status" aria-live="polite">
-                <span className="status-dot size-1.5 rounded-full bg-teal" />
-                {status}
-              </p>
+              <div role="status" aria-live="polite">
+                <p className="flex items-center gap-2 text-sm text-ink-mid">
+                  <span className="status-dot size-1.5 rounded-full bg-teal" />
+                  {status}
+                </p>
+                <p className="mt-1 text-sm text-ink-muted">Pencarian sumber dapat memerlukan beberapa saat. Anda dapat menghentikannya kapan saja.</p>
+              </div>
             ) : (
               message.content && (
-                <div className="reading max-w-[65ch] text-[1.0625rem] text-ink">
-                  <Markdown components={markdown}>{message.content}</Markdown>
-                </div>
+                <section aria-label="Jawaban">
+                  <h2 className="mb-3 text-sm font-semibold text-ink-mid">Jawaban</h2>
+                  <div className="reading max-w-[65ch] text-[1.0625rem] text-ink">
+                    <Markdown components={markdown}>{message.content}</Markdown>
+                  </div>
+                </section>
               )
             )}
-            {!message.pending && message.planError ? (
-              <Callout
-                tone="warning"
-                onRetry={previousQuestion ? () => onRetry(previousQuestion) : undefined}
-              >
-                {message.planError}
-              </Callout>
-            ) : null}
-            {!message.pending
-              ? otherNotices(message).map((text) => (
-                  <Callout key={text} tone="warning">
-                    {text}
+            {hasNotes ? (
+              <section aria-label="Batasan dan catatan" className="space-y-3">
+                <h3 className="text-sm font-semibold text-ink-mid">Batasan dan catatan</h3>
+                {message.planError ? (
+                  <Callout tone="warning" onRetry={previousQuestion ? () => onRetry(previousQuestion) : undefined}>
+                    {message.planError}
                   </Callout>
-                ))
-              : null}
-            {!message.pending && message.sqlWarnings ? <Callout tone="insight">{message.sqlWarnings}</Callout> : null}
-            {message.chart ? <ChartCard chart={message.chart} /> : null}
-            <SourceChips sources={message.sources} />
+                ) : null}
+                {notices.map((text) => <Callout key={text} tone="warning">{text}</Callout>)}
+                {message.sqlWarnings ? <Callout tone="insight">{message.sqlWarnings}</Callout> : null}
+              </section>
+            ) : null}
+            {message.chart ? (
+              <section aria-label="Visualisasi data">
+                <ChartCard chart={message.chart} />
+              </section>
+            ) : null}
+            {message.sources.length > 0 ? (
+              <section aria-label="Sumber data">
+                <h3 className="mb-3 text-sm font-semibold text-ink-mid">Sumber data</h3>
+                <SourceChips sources={message.sources} />
+              </section>
+            ) : null}
           </li>
         );
       })}

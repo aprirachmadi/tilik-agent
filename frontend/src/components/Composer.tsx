@@ -32,7 +32,7 @@ export function Composer({ value, disabled, streaming, fieldRef, onChange, onSub
       }}
     >
       <label className="sr-only" htmlFor="question">
-        Question
+        Pertanyaan
       </label>
       <div className="flex items-end gap-2 px-3 py-2">
         <textarea
@@ -41,7 +41,7 @@ export function Composer({ value, disabled, streaming, fieldRef, onChange, onSub
           rows={1}
           value={value}
           disabled={disabled}
-          placeholder="Ask a question about a BPS figure"
+          placeholder="Tanyakan angka atau perbandingan data BPS"
           aria-describedby="question-hint"
           className="max-h-40 min-h-11 flex-1 resize-none bg-transparent px-1 py-2.5 text-base leading-6 text-ink caret-teal outline-none placeholder:text-ink-muted disabled:opacity-60"
           onChange={(event) => onChange(event.target.value)}
@@ -60,12 +60,12 @@ export function Composer({ value, disabled, streaming, fieldRef, onChange, onSub
             onClick={onStop}
             className="mb-1 min-h-11 shrink-0 rounded-full bg-ink px-4 text-sm font-medium text-canvas hover:bg-ink-mid"
           >
-            Stop
+            Hentikan
           </button>
         ) : (
           <button
             type="submit"
-            aria-label="Send question"
+            aria-label="Kirim pertanyaan"
             disabled={disabled || !value.trim()}
             className="mb-1 flex size-11 shrink-0 items-center justify-center rounded-full bg-teal text-white transition hover:bg-teal-press disabled:cursor-not-allowed disabled:bg-line disabled:text-ink-muted"
           >
@@ -74,7 +74,7 @@ export function Composer({ value, disabled, streaming, fieldRef, onChange, onSub
         )}
       </div>
       <p id="question-hint" className="px-4 pb-3 text-sm leading-5 text-ink-muted">
-        Enter sends. Shift+Enter starts a new line.
+        Enter untuk mengirim. Shift+Enter untuk baris baru.
       </p>
     </form>
   );

@@ -20,6 +20,15 @@ function readableError(error: unknown, fallback: string): string {
   return fallback;
 }
 
+function localizedStatus(value: string): string {
+  const labels: Record<string, string> = {
+    "Looking up datasets": "Mencari tabel BPS",
+    "Searching SP2020": "Mencari publikasi SP2020",
+    "Writing the answer": "Menyusun jawaban",
+  };
+  return labels[value] ?? "Memeriksa sumber data";
+}
+
 function isAbort(error: unknown): boolean {
   return error instanceof Error && error.name === "AbortError";
 }
@@ -73,7 +82,7 @@ export function Workspace() {
       })
       .catch((error: unknown) => {
         if (!controller.signal.aborted && !isAbort(error)) {
-          setHistoryError(readableError(error, "History did not load. Try again."));
+          setHistoryError(readableError(error, "Riwayat tidak dapat dimuat. Coba lagi."));
         }
       });
     return () => controller.abort();
@@ -99,7 +108,7 @@ export function Workspace() {
       .catch((error: unknown) => {
         if (!controller.signal.aborted && !isAbort(error)) {
           setMessages([]);
-          setThreadError(readableError(error, "This question did not open. Try again."));
+          setThreadError(readableError(error, "Pertanyaan ini tidak dapat dibuka. Coba lagi."));
         }
       })
       .finally(() => {
@@ -132,6 +141,22 @@ export function Workspace() {
     abortRef.current?.abort();
   }
 
+  function leaveFor(path: string) {
+    if (path === (activeId ? `/c/${activeId}` : "/")) {
+      stop();
+      setSidebarOpen(false);
+      return;
+    }
+    if (abortRef.current) {
+      abortRef.current.abort();
+      abortRef.current = null;
+      setStreaming(false);
+      setStatus(null);
+    }
+    setSidebarOpen(false);
+    navigate(path);
+  }
+
   async function ask(question: string) {
     const text = question.trim();
     if (!text || streaming) {
@@ -142,7 +167,7 @@ export function Workspace() {
     abortRef.current = controller;
     setDraft("");
     setStreaming(true);
-    setStatus("Checking published tables");
+    setStatus("Memeriksa tabel yang tersedia");
     setThreadError(null);
     setMessages((current) => [
       ...current,
@@ -175,19 +200,29 @@ export function Workspace() {
     ]);
 
     try {
-      const result = await streamQuestion(text, conversationAtSend, setStatus, controller.signal);
+      const result = await streamQuestion(
+        text,
+        conversationAtSend,
+        (value) => {
+          if (abortRef.current === controller) setStatus(localizedStatus(value));
+        },
+        controller.signal,
+      );
+      if (abortRef.current !== controller) return;
       setMessages((current) => current.map((message) => (message.pending ? messageFromResult(result) : message)));
       setStatus(null);
       await refreshConversations();
+      if (abortRef.current !== controller) return;
       if (!conversationAtSend) {
         skipLoad.current = result.conversation_id;
         navigate(`/c/${result.conversation_id}`);
       }
     } catch (error: unknown) {
+      if (abortRef.current !== controller) return;
       const stopped = isAbort(error);
       const detail = stopped
-        ? "Stopped before an answer was ready."
-        : readableError(error, "This question did not get an answer. Try again.");
+        ? "Pencarian dihentikan sebelum jawaban selesai. Anda dapat mencoba lagi."
+        : readableError(error, "Jawaban belum dapat disiapkan. Coba lagi.");
       setMessages((current) =>
         current.map((message) =>
           message.pending
@@ -201,9 +236,11 @@ export function Workspace() {
       );
       setStatus(null);
     } finally {
-      abortRef.current = null;
-      setStreaming(false);
-      composerField.current?.focus();
+      if (abortRef.current === controller) {
+        abortRef.current = null;
+        setStreaming(false);
+        composerField.current?.focus();
+      }
     }
   }
 
@@ -214,7 +251,7 @@ export function Workspace() {
 
   const title =
     conversations.find((conversation) => conversation.id === activeId)?.title?.trim() ||
-    (activeId ? "Untitled question" : null);
+    (activeId ? "Pertanyaan tanpa judul" : null);
   const showEmpty = !activeId && messages.length === 0 && !loadingThread && !threadError;
 
   const composer = (
@@ -235,21 +272,10 @@ export function Workspace() {
         conversations={conversations}
         activeId={activeId}
         open={sidebarOpen}
-        disabled={streaming}
         historyError={historyError}
         onClose={() => setSidebarOpen(false)}
-        onNew={() => {
-          setSidebarOpen(false);
-          if (!streaming) {
-            navigate("/");
-          }
-        }}
-        onSelect={(id) => {
-          setSidebarOpen(false);
-          if (!streaming) {
-            navigate(`/c/${id}`);
-          }
-        }}
+        onNew={() => leaveFor("/")}
+        onSelect={(id) => leaveFor(`/c/${id}`)}
         onRetryHistory={() => setHistoryReload((current) => current + 1)}
       />
       <main className="relative flex min-w-0 flex-1 flex-col">
@@ -261,16 +287,16 @@ export function Workspace() {
           <button
             type="button"
             className="flex size-11 items-center justify-center rounded-lg text-ink-mid hover:bg-user lg:hidden"
-            aria-label="Open history"
+            aria-label="Buka riwayat"
             aria-expanded={sidebarOpen}
             onClick={() => setSidebarOpen(true)}
           >
             <Menu size={20} />
           </button>
           {title ? (
-            <h2 className="line-clamp-2 py-2 text-base leading-snug font-medium" title={title}>
+            <h1 className="line-clamp-2 py-2 text-base leading-snug font-medium" title={title}>
               {title}
-            </h2>
+            </h1>
           ) : (
             <p className="reading text-base leading-5 font-medium">Tilik</p>
           )}
@@ -286,7 +312,7 @@ export function Workspace() {
             <div className="mx-auto w-full max-w-3xl px-4 pt-8 pb-40 sm:px-6">
               {loadingThread ? (
                 <p className="text-sm text-ink-mid" role="status">
-                  Opening this question
+                  Membuka pertanyaan
                 </p>
               ) : null}
               {threadError ? (
@@ -297,7 +323,7 @@ export function Workspace() {
                     onClick={() => setThreadReload((current) => current + 1)}
                     className="mt-3 min-h-11 rounded-full bg-ink px-4 text-sm font-medium text-canvas"
                   >
-                    Try again
+                    Coba lagi
                   </button>
                 </div>
               ) : null}

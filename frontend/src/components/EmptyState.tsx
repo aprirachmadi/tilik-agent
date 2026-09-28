@@ -15,9 +15,14 @@ export function EmptyState({ onPick }: EmptyStateProps) {
     <div className="mx-auto flex w-full max-w-xl flex-col items-center text-center">
       <Logo size={40} />
       <h1 className="reading mt-8 max-w-[22rem] text-[1.75rem] leading-tight font-medium text-balance">
-        Ask about a BPS table or the SP2020 publication.
+        Tanyakan data dan temukan sumbernya.
       </h1>
-      <ul className="mt-5 w-full border-b border-line text-left">
+      <p className="mt-3 max-w-[34rem] text-base leading-6 text-ink-mid">
+        Tilik menjawab pertanyaan dari tabel Badan Pusat Statistik (BPS) yang tersedia dan publikasi
+        Statistik Demografi Indonesia hasil Sensus Penduduk 2020 (SP2020). Ketersediaan tahun dan wilayah mengikuti sumber.
+      </p>
+      <p className="mt-6 w-full text-left text-sm font-medium text-ink-mid">Contoh pertanyaan</p>
+      <ul className="mt-2 w-full border-b border-line text-left">
         {visible.map((suggestion) => (
           <li key={suggestion.id} className="border-t border-line">
             <button
@@ -37,7 +42,7 @@ export function EmptyState({ onPick }: EmptyStateProps) {
           aria-expanded={showMore}
           onClick={() => setShowMore((current) => !current)}
         >
-          {showMore ? "Show fewer questions" : `${hiddenCount} more questions`}
+          {showMore ? "Tampilkan lebih sedikit" : `Lihat ${hiddenCount} contoh lainnya`}
         </button>
       ) : null}
     </div>

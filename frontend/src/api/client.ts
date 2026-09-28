@@ -11,6 +11,9 @@ async function readError(response: Response): Promise<string> {
   try {
     const body = (await response.json()) as { detail?: string };
     if (typeof body.detail === "string" && body.detail) {
+      if (body.detail === "Conversation not found") {
+        return "Percakapan tidak ditemukan.";
+      }
       return body.detail;
     }
   } catch {
@@ -78,7 +81,7 @@ export async function streamQuestion(
     signal,
   });
   if (!response.ok || !response.body) {
-    throw new ApiError(response.ok ? "The stream did not start." : await readError(response));
+    throw new ApiError(response.ok ? "Jawaban tidak dapat dimulai. Coba lagi." : await readError(response));
   }
 
   const reader = response.body.getReader();
@@ -111,7 +114,7 @@ export async function streamQuestion(
   }
 
   if (!result) {
-    throw new ApiError("The stream ended without an answer.");
+    throw new ApiError("Proses berakhir tanpa jawaban. Coba lagi.");
   }
   return result;
 }

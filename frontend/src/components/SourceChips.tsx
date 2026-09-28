@@ -11,17 +11,20 @@ type Citation = {
   href: string | null;
 };
 
+const SP2020_PUBLICATION_URL =
+  "https://www.bps.go.id/id/publication/2025/01/31/29a40174e02f20a7a31b5bc3/statistik-demografi-indonesia--hasil-sensus-penduduk-2020-.html";
+
 function describe(source: SourceChip, index: number): Citation | null {
   if (source.kind === "dataset") {
     const tableId = source.bps_table_id?.trim() ?? "";
-    const title = source.title?.trim() || "BPS table";
+    const title = source.title?.trim() || "Tabel BPS";
     if (!tableId && !source.title) {
       return null;
     }
     return {
       key: `dataset-${source.dataset_id ?? index}-${tableId}`,
       title,
-      detail: tableId ? `Table ${tableId}` : "BPS table",
+      detail: tableId ? `Tabel ${tableId}` : "Tabel BPS",
       href: tableId ? `https://www.bps.go.id/id/statistics-table/2/${encodeURIComponent(tableId)}` : null,
     };
   }
@@ -30,9 +33,9 @@ function describe(source: SourceChip, index: number): Citation | null {
   }
   return {
     key: `document-${source.document_id}`,
-    title: "SP2020 demography",
-    detail: source.document_id,
-    href: null,
+    title: "Statistik Demografi Indonesia (SP2020)",
+    detail: "Publikasi BPS",
+    href: SP2020_PUBLICATION_URL,
   };
 }
 
@@ -51,7 +54,7 @@ export function SourceChips({ sources }: SourceChipsProps) {
             <span className="block text-sm font-medium text-teal">{citation.title}</span>
             <span className="mt-0.5 block text-sm text-ink-mid">
               {citation.detail}
-              {citation.href ? " · Opens on BPS" : ""}
+              {citation.href ? " · Buka di BPS" : ""}
             </span>
           </>
         );

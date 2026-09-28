@@ -12,7 +12,7 @@ export const suggestions: Suggestion[] = [
   {
     id: "3",
     question:
-      "Berapa selisih TPT Provinsi Jawa Barat antara Februari dan Agustus 2025, dan pada bulan mana nilainya lebih tinggi?",
+      "Berapa selisih tingkat pengangguran terbuka (TPT) Provinsi Jawa Barat antara Februari dan Agustus 2025, dan pada bulan mana nilainya lebih tinggi?",
   },
   {
     id: "7",

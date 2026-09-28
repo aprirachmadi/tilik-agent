@@ -102,7 +102,7 @@ export function ChartCard({ chart }: ChartCardProps) {
           {chart.x_axis} · {chart.y_axis}
         </p>
       </figcaption>
-      <ul className="mt-4 flex flex-wrap gap-x-5 gap-y-2" aria-label="Chart series">
+      <ul className="mt-4 flex flex-wrap gap-x-5 gap-y-2" aria-label="Seri grafik">
         {series.map((name, index) => (
           <li key={name} className="flex items-center gap-2 text-sm text-ink">
             <span
