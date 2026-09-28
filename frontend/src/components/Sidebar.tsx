@@ -1,8 +1,15 @@
-import { Plus, X } from "lucide-react";
+import { Search, Plus, X } from "lucide-react";
+import { useState } from "react";
 import type { ConversationSummary } from "../api/types";
 import { Logo } from "./Logo";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const updatedFormat = new Intl.DateTimeFormat("id-ID", {
+  day: "numeric",
+  month: "short",
+  hour: "2-digit",
+  minute: "2-digit",
+});
 
 type SidebarProps = {
   conversations: ConversationSummary[];
@@ -54,7 +61,12 @@ export function Sidebar({
   onSelect,
   onRetryHistory,
 }: SidebarProps) {
-  const groups = groupConversations(conversations);
+  const [search, setSearch] = useState("");
+  const query = search.trim().toLocaleLowerCase("id-ID");
+  const filtered = query
+    ? conversations.filter((conversation) => conversationLabel(conversation).toLocaleLowerCase("id-ID").includes(query))
+    : conversations;
+  const groups = groupConversations(filtered);
 
   return (
     <>
@@ -98,7 +110,21 @@ export function Sidebar({
           </button>
         </div>
 
-        <nav className="mt-4 flex-1 overflow-y-auto px-3 pb-6" aria-label="Riwayat pertanyaan">
+        {conversations.length > 0 ? (
+          <div className="relative mt-3 px-3">
+            <Search size={17} aria-hidden="true" className="pointer-events-none absolute top-3.5 left-6 text-ink-muted" />
+            <input
+              type="search"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              aria-label="Cari riwayat pertanyaan"
+              placeholder="Cari riwayat"
+              className="min-h-11 w-full rounded-lg border border-line bg-canvas pr-3 pl-10 text-sm text-ink placeholder:text-ink-muted"
+            />
+          </div>
+        ) : null}
+
+        <nav className="mt-3 flex-1 overflow-y-auto px-3 pb-6" aria-label="Riwayat pertanyaan">
           {historyError ? (
             <div className="mb-4 rounded-xl bg-clay-wash px-3 py-3 text-ink" role="alert">
               <p className="text-sm leading-5">{historyError}</p>
@@ -112,7 +138,9 @@ export function Sidebar({
             </div>
           ) : null}
           {groups.length === 0 && !historyError ? (
-            <p className="px-2 pt-6 text-sm text-ink-muted">Belum ada pertanyaan.</p>
+            <p className="px-2 pt-6 text-sm text-ink-muted">
+              {query ? "Tidak ada pertanyaan yang cocok." : "Belum ada pertanyaan."}
+            </p>
           ) : (
             groups.map((group) => (
               <div key={group.label} className="mb-5">
@@ -128,11 +156,14 @@ export function Sidebar({
                           title={label}
                           aria-current={selected ? "page" : undefined}
                           onClick={() => onSelect(conversation.id)}
-                          className={`line-clamp-2 w-full rounded-lg px-2.5 py-2 text-left text-sm leading-5 break-words ${
+                          className={`w-full rounded-lg px-2.5 py-2 text-left text-sm leading-5 break-words ${
                             selected ? "bg-user font-medium text-ink" : "text-ink-mid hover:bg-canvas hover:text-ink"
                           }`}
                         >
-                          {label}
+                          <span className="line-clamp-2">{label}</span>
+                          <span className="mt-0.5 block text-xs font-normal text-ink-muted">
+                            {updatedFormat.format(new Date(conversation.updated_at))}
+                          </span>
                         </button>
                       </li>
                     );

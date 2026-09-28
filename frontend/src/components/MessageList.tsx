@@ -35,14 +35,11 @@ const markdown: Components = {
 type MessageListProps = {
   messages: ThreadMessage[];
   status: string | null;
+  busy: boolean;
   onRetry: (question: string) => void;
 };
 
-function otherNotices(message: ThreadMessage): string[] {
-  return [message.sqlError, message.retrievalError, message.chartError].filter((value): value is string => Boolean(value));
-}
-
-export function MessageList({ messages, status, onRetry }: MessageListProps) {
+export function MessageList({ messages, status, busy, onRetry }: MessageListProps) {
   return (
     <ol className="space-y-10">
       {messages.map((message, index) => {
@@ -60,8 +57,10 @@ export function MessageList({ messages, status, onRetry }: MessageListProps) {
           .slice(0, index)
           .reverse()
           .find((item) => item.role === "user")?.content;
-        const notices = otherNotices(message);
-        const hasNotes = !message.pending && (Boolean(message.planError) || notices.length > 0 || Boolean(message.sqlWarnings));
+        const hasFailure = Boolean(message.planError || message.sqlError || message.retrievalError || message.chartError);
+        const hasNotes = !message.pending && (hasFailure || Boolean(message.sqlWarnings));
+        const missingSources = !message.pending && message.sourceRoute !== "direct" &&
+          (Boolean(message.content.trim()) || Boolean(message.chart)) && message.sources.length === 0;
         return (
           <li key={message.key} className="space-y-7">
             {message.pending && last && status ? (
@@ -75,7 +74,10 @@ export function MessageList({ messages, status, onRetry }: MessageListProps) {
             ) : (
               message.content && (
                 <section aria-label="Jawaban">
-                  <h2 className="mb-3 text-sm font-semibold text-ink-mid">Jawaban</h2>
+                  <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <h2 className="text-sm font-semibold text-ink-mid">Jawaban</h2>
+                    {(hasFailure || missingSources) ? <span className="text-sm text-clay">Perlu verifikasi</span> : null}
+                  </div>
                   <div className="reading max-w-[65ch] text-[1.0625rem] text-ink">
                     <Markdown components={markdown}>{message.content}</Markdown>
                   </div>
@@ -86,12 +88,40 @@ export function MessageList({ messages, status, onRetry }: MessageListProps) {
               <section aria-label="Batasan dan catatan" className="space-y-3">
                 <h3 className="text-sm font-semibold text-ink-mid">Batasan dan catatan</h3>
                 {message.planError ? (
-                  <Callout tone="warning" onRetry={previousQuestion ? () => onRetry(previousQuestion) : undefined}>
+                  <Callout tone="warning" title="Jawaban belum selesai" guidance="Ulangi pertanyaan. Jika masih gagal, sebutkan indikator, wilayah, dan periode dengan lebih jelas.">
                     {message.planError}
                   </Callout>
                 ) : null}
-                {notices.map((text) => <Callout key={text} tone="warning">{text}</Callout>)}
-                {message.sqlWarnings ? <Callout tone="insight">{message.sqlWarnings}</Callout> : null}
+                {message.sqlError ? (
+                  <Callout tone="warning" title="Data tabel belum lengkap" guidance="Coba lagi, atau persempit pertanyaan ke satu indikator, wilayah, dan periode.">
+                    {message.sqlError}
+                  </Callout>
+                ) : null}
+                {message.retrievalError ? (
+                  <Callout tone="warning" title="Kutipan publikasi belum lengkap" guidance="Coba lagi atau tanyakan topik publikasi dengan lebih spesifik.">
+                    {message.retrievalError}
+                  </Callout>
+                ) : null}
+                {message.chartError ? (
+                  <Callout tone="warning" title="Grafik belum tersedia" guidance="Gunakan angka dalam jawaban jika tersedia, atau ulangi pertanyaan untuk mencoba membuat grafik lagi.">
+                    {message.chartError}
+                  </Callout>
+                ) : null}
+                {message.sqlWarnings ? (
+                  <Callout tone="insight" guidance="Periksa catatan dan sumber sebelum menggunakan hasil ini.">
+                    {message.sqlWarnings}
+                  </Callout>
+                ) : null}
+                {hasFailure && previousQuestion ? (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => onRetry(previousQuestion)}
+                    className="min-h-11 rounded-full bg-ink px-4 text-sm font-medium text-canvas hover:bg-ink-mid disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    Ulangi pertanyaan
+                  </button>
+                ) : null}
               </section>
             ) : null}
             {message.chart ? (
@@ -99,10 +129,15 @@ export function MessageList({ messages, status, onRetry }: MessageListProps) {
                 <ChartCard chart={message.chart} />
               </section>
             ) : null}
-            {message.sources.length > 0 ? (
+            {message.sources.length > 0 || missingSources ? (
               <section aria-label="Sumber data">
                 <h3 className="mb-3 text-sm font-semibold text-ink-mid">Sumber data</h3>
-                <SourceChips sources={message.sources} />
+                {missingSources ? (
+                  <div role="note" className="max-w-[65ch] rounded-lg bg-clay-wash px-4 py-3 text-sm leading-6 text-ink">
+                    <p className="font-medium text-clay">Sumber belum tersedia untuk jawaban ini.</p>
+                    <p>Periksa angka sebelum digunakan. Anda dapat bertanya ulang dengan indikator, wilayah, dan periode yang lebih spesifik.</p>
+                  </div>
+                ) : <SourceChips sources={message.sources} />}
               </section>
             ) : null}
           </li>

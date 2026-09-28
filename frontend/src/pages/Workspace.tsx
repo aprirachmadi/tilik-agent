@@ -177,6 +177,7 @@ export function Workspace() {
         content: text,
         chart: null,
         sources: [],
+        sourceRoute: null,
         chartError: null,
         planError: null,
         sqlError: null,
@@ -190,6 +191,7 @@ export function Workspace() {
         content: "",
         chart: null,
         sources: [],
+        sourceRoute: null,
         chartError: null,
         planError: null,
         sqlError: null,
@@ -328,7 +330,7 @@ export function Workspace() {
                 </div>
               ) : null}
               {messages.length > 0 ? (
-                <MessageList messages={messages} status={status} onRetry={(question) => void ask(question)} />
+                <MessageList messages={messages} status={status} busy={streaming} onRetry={(question) => void ask(question)} />
               ) : null}
             </div>
           )}

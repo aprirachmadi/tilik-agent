@@ -114,7 +114,7 @@ export function ChartCard({ chart }: ChartCardProps) {
           </li>
         ))}
       </ul>
-      <div className="mt-4 h-72">
+      <div className="mt-4 h-72" aria-hidden="true">
         <ResponsiveContainer width="100%" height="100%">
           {chart.type === "line" ? (
             <LineChart {...shared}>
@@ -152,6 +152,35 @@ export function ChartCard({ chart }: ChartCardProps) {
           )}
         </ResponsiveContainer>
       </div>
+      <details className="mt-4 border-t border-line pt-2">
+        <summary className="flex min-h-11 cursor-pointer items-center text-sm font-medium text-teal hover:text-teal-press">
+          Lihat data grafik
+        </summary>
+        <div className="mt-2 overflow-x-auto">
+          <table className="w-full min-w-max border-collapse text-left text-sm tabular-nums">
+            <caption className="sr-only">Data grafik: {chart.title}</caption>
+            <thead>
+              <tr className="border-b border-line text-ink-mid">
+                <th scope="col" className="px-3 py-2 font-semibold">{chart.x_axis}</th>
+                {series.map((name) => <th key={name} scope="col" className="px-3 py-2 font-semibold">{name}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr key={row.label} className="border-b border-line/70 last:border-0">
+                  <th scope="row" className="px-3 py-2 font-medium text-ink">{row.label}</th>
+                  {series.map((name) => (
+                    <td key={name} className="px-3 py-2 text-ink">
+                      {typeof row[name] === "number" ? numberFormat.format(row[name]) : "—"}
+                      {typeof row[name] === "number" && row.units[name] ? ` ${row.units[name]}` : ""}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </details>
     </figure>
   );
 }

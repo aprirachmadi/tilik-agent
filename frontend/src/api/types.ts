@@ -69,6 +69,7 @@ export type ThreadMessage = {
   content: string;
   chart: ChartSpec | null;
   sources: SourceChip[];
+  sourceRoute: string | null;
   chartError: string | null;
   planError: string | null;
   sqlError: string | null;
@@ -97,6 +98,7 @@ export function messageFromHistory(message: ConversationMessage): ThreadMessage 
     content: message.content,
     chart: asChart(message.chart),
     sources: message.sources ?? [],
+    sourceRoute: message.source_route,
     chartError: message.chart_error,
     planError: null,
     sqlError: null,
@@ -113,6 +115,7 @@ export function messageFromResult(result: QuestionResponse): ThreadMessage {
     content: result.answer ?? "",
     chart: asChart(result.chart),
     sources: result.sources ?? [],
+    sourceRoute: result.source_route,
     chartError: result.chart_error,
     planError: result.plan_error,
     sqlError: result.sql_error,
