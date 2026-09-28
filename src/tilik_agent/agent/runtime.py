@@ -50,7 +50,7 @@ def get_vector_store() -> PGVector:
     config = get_agent_config()
     connection = os.getenv(
         "PGVECTOR_CONNECTION",
-        "postgresql+psycopg://tilik:tilik@localhost:5432/tilik",
+        "postgresql+psycopg://tilik:tilik@localhost:5431/tilik",
     )
     key = (
         config.embedding.model,
