@@ -1,6 +1,6 @@
 import type { Components } from "react-markdown";
 import Markdown from "react-markdown";
-import type { ThreadMessage } from "../api/types";
+import type { ChartSpec, ThreadMessage } from "../api/types";
 import { Callout } from "./Callout";
 import { ChartCard } from "./ChartCard";
 import { SourceChips } from "./SourceChips";
@@ -32,6 +32,22 @@ const markdown: Components = {
   h3: ({ children }) => <h4 className="mt-4 mb-2 text-base font-medium">{children}</h4>,
 };
 
+function answerWithoutDuplicateChart(content: string, chart: ChartSpec | null): string {
+  if (!chart) return content;
+
+  return content.replace(
+    /(^|\n\n)(?:\*\*Grafik: [^\n]+\*\*\n\n)?```[^\n]*\n([\s\S]*?)\n```/g,
+    (block, space: string, data: string) => {
+      if (!data.includes("█")) return block;
+      const lines = data.split("\n").map((line) => line.trimStart());
+      const matchingLabels = new Set(chart.data.map((point) => point.label).filter((label) =>
+        lines.some((line) => line.startsWith(`${label} `)),
+      ));
+      return matchingLabels.size >= 2 ? space : block;
+    },
+  ).replace(/\n{3,}/g, "\n\n").trim();
+}
+
 type MessageListProps = {
   messages: ThreadMessage[];
   status: string | null;
@@ -58,7 +74,7 @@ export function MessageList({ messages, status, busy, onRetry }: MessageListProp
           .reverse()
           .find((item) => item.role === "user")?.content;
         const hasFailure = Boolean(message.planError || message.sqlError || message.retrievalError || message.chartError);
-        const hasNotes = !message.pending && (hasFailure || Boolean(message.sqlWarnings));
+        const hasNotes = !message.pending && hasFailure;
         const missingSources = !message.pending && message.sourceRoute !== "direct" &&
           (Boolean(message.content.trim()) || Boolean(message.chart)) && message.sources.length === 0;
         return (
@@ -79,7 +95,7 @@ export function MessageList({ messages, status, busy, onRetry }: MessageListProp
                     {(hasFailure || missingSources) ? <span className="text-sm text-clay">Perlu verifikasi</span> : null}
                   </div>
                   <div className="reading max-w-[65ch] text-[1.0625rem] text-ink">
-                    <Markdown components={markdown}>{message.content}</Markdown>
+                    <Markdown components={markdown}>{answerWithoutDuplicateChart(message.content, message.chart)}</Markdown>
                   </div>
                 </section>
               )
@@ -105,11 +121,6 @@ export function MessageList({ messages, status, busy, onRetry }: MessageListProp
                 {message.chartError ? (
                   <Callout tone="warning" title="Grafik belum tersedia" guidance="Gunakan angka dalam jawaban jika tersedia, atau ulangi pertanyaan untuk mencoba membuat grafik lagi.">
                     {message.chartError}
-                  </Callout>
-                ) : null}
-                {message.sqlWarnings ? (
-                  <Callout tone="insight" guidance="Periksa catatan dan sumber sebelum menggunakan hasil ini.">
-                    {message.sqlWarnings}
                   </Callout>
                 ) : null}
                 {hasFailure && previousQuestion ? (
