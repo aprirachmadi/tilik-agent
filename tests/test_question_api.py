@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
@@ -17,6 +17,7 @@ from tilik_agent.agent.runner import cited_sources, question_result, run_questio
 from tilik_agent.agent.schemas import State
 from tilik_agent.api import app, status_lines
 from tilik_agent.chat.models import Conversation, Message
+from tilik_agent.ingestion.models import Dataset
 from tilik_agent.chat.storage import list_conversations, load_full_thread
 from tilik_agent.config import get_agent_config
 
@@ -113,6 +114,7 @@ class _WorkspaceGraph:
                             "dataset": {
                                 "id": 9,
                                 "bps_table_id": "MTU3MyMx",
+                                "tablesource": "1",
                                 "title": "Tingkat Pengangguran Terbuka",
                             }
                         }
@@ -212,7 +214,7 @@ def test_cited_sources_use_titles_for_cited_ids() -> None:
     The answer cites one observation and one document, and source details include the dataset title.
 
     Expected:
-    The compact source list has that dataset id, BPS table id, and title, then the document id.
+    The compact source list has that dataset id, BPS table id, tablesource, and title, then the document id.
     """
     state: State = {
         "answer_observation_ids": [1, 1],
@@ -222,7 +224,15 @@ def test_cited_sources_use_titles_for_cited_ids() -> None:
             {"observation_id": 2, "dataset_id": 8},
         ],
         "source_details": {
-            "datasets": {"9": {"dataset": {"bps_table_id": "MTU3MyMx", "title": "Tingkat Pengangguran Terbuka"}}}
+            "datasets": {
+                "9": {
+                    "dataset": {
+                        "bps_table_id": "MTU3MyMx",
+                        "tablesource": "1",
+                        "title": "Tingkat Pengangguran Terbuka",
+                    }
+                }
+            }
         },
     }
     assert cited_sources(state) == [
@@ -230,6 +240,7 @@ def test_cited_sources_use_titles_for_cited_ids() -> None:
             "kind": "dataset",
             "dataset_id": 9,
             "bps_table_id": "MTU3MyMx",
+            "tablesource": "1",
             "title": "Tingkat Pengangguran Terbuka",
         },
         {"kind": "document", "document_id": "s1:doc1"},
@@ -265,6 +276,7 @@ def test_questions_persists_chart_sources_and_lists_the_thread(
             "kind": "dataset",
             "dataset_id": 9,
             "bps_table_id": "MTU3MyMx",
+            "tablesource": "1",
             "title": "Tingkat Pengangguran Terbuka",
         },
         {"kind": "document", "document_id": "s1:doc1"},
@@ -305,6 +317,108 @@ def test_questions_persists_chart_sources_and_lists_the_thread(
     assert reloaded["updated_at"] >= first_updated
     missing = client.get("/conversations/missing")
     assert missing.status_code == 404
+
+
+class _SourceWithoutTablesourceGraph:
+    def stream(self, state: dict[str, Any], config: dict[str, Any], stream_mode: list[str]) -> Iterator[dict[str, Any]]:
+        yield {
+            "run_sql": {
+                "observations": [{"observation_id": 1, "dataset_id": 129, "value": 1}],
+                "source_details": {
+                    "datasets": {
+                        "129": {
+                            "dataset": {
+                                "id": 129,
+                                "bps_table_id": "MTk3NSMy",
+                                "title": "Jumlah Penduduk Pertengahan Tahun (Ribu Jiwa)",
+                            }
+                        }
+                    }
+                },
+            }
+        }
+        yield {
+            "write_answer": {
+                "answer": "Naik.",
+                "answer_observation_ids": [1],
+                "answer_document_ids": [],
+            }
+        }
+
+
+def test_saved_answer_fills_tablesource(monkeypatch: pytest.MonkeyPatch, chat_db: Session) -> None:
+    """
+    Condition:
+    The answer cites a dataset whose source details omit tablesource, and that dataset row stores one.
+
+    Expected:
+    The question response and the stored assistant message include tablesource from the dataset row.
+    """
+    Dataset.__table__.create(chat_db.get_bind())
+    chat_db.add(
+        Dataset(
+            id=129,
+            bps_table_id="MTk3NSMy",
+            tablesource="2",
+            domain_id="0000",
+            title="Jumlah Penduduk Pertengahan Tahun (Ribu Jiwa)",
+        )
+    )
+    chat_db.commit()
+    monkeypatch.setattr("tilik_agent.agent.runner.compile_graph", lambda: _SourceWithoutTablesourceGraph())
+
+    created = TestClient(app).post("/questions", json={"question": "berapa penduduk"})
+    assert created.status_code == 200
+    source = created.json()["sources"][0]
+    assert source["tablesource"] == "2"
+    assert source["bps_table_id"] == "MTk3NSMy"
+
+    stored = chat_db.scalars(select(Message).where(Message.role == "assistant")).one()
+    chat_db.refresh(stored)
+    assert stored.sources[0]["tablesource"] == "2"
+
+
+def test_reloaded_source_gains_tablesource(chat_db: Session) -> None:
+    """
+    Condition:
+    An assistant message was saved with a dataset id and BPS table id, and no tablesource.
+
+    Expected:
+    Reloading the thread fills tablesource from the dataset row so the chip can link.
+    """
+    Dataset.__table__.create(chat_db.get_bind())
+    chat_db.add(
+        Dataset(
+            id=129,
+            bps_table_id="MTk3NSMy",
+            tablesource="2",
+            domain_id="0000",
+            title="Jumlah Penduduk Pertengahan Tahun (Ribu Jiwa)",
+        )
+    )
+    chat_db.add(Conversation(id="saved-thread", title="penduduk"))
+    chat_db.add(
+        Message(
+            conversation_id="saved-thread",
+            role="assistant",
+            content="Jumlahnya naik.",
+            sources=[
+                {
+                    "kind": "dataset",
+                    "dataset_id": 129,
+                    "bps_table_id": "MTk3NSMy",
+                    "title": "Jumlah Penduduk Pertengahan Tahun (Ribu Jiwa)",
+                }
+            ],
+        )
+    )
+    chat_db.commit()
+
+    detail = TestClient(app).get("/conversations/saved-thread")
+    assert detail.status_code == 200
+    source = detail.json()["messages"][0]["sources"][0]
+    assert source["tablesource"] == "2"
+    assert source["bps_table_id"] == "MTk3NSMy"
 
 
 def test_chart_error_round_trips(monkeypatch: pytest.MonkeyPatch, chat_db: Session) -> None:

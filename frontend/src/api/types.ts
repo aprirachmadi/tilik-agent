@@ -18,6 +18,7 @@ export type DatasetSource = {
   kind: "dataset";
   dataset_id?: number;
   bps_table_id?: string | null;
+  tablesource?: string | null;
   title?: string | null;
 };
 

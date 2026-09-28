@@ -17,15 +17,21 @@ const SP2020_PUBLICATION_URL =
 function describe(source: SourceChip, index: number): Citation | null {
   if (source.kind === "dataset") {
     const tableId = source.bps_table_id?.trim() ?? "";
+    const tablesource = source.tablesource?.trim() ?? "";
     const title = source.title?.trim() || "Tabel BPS";
     if (!tableId && !source.title) {
       return null;
     }
+    const href =
+      tableId && tablesource
+        ? "https://www.bps.go.id/id/statistics-table/" +
+          `${encodeURIComponent(tablesource)}/${encodeURIComponent(tableId)}/tabel.html`
+        : null;
     return {
       key: `dataset-${source.dataset_id ?? index}-${tableId}`,
       title,
       detail: tableId ? `Tabel ${tableId}` : "Tabel BPS",
-      href: tableId ? `https://www.bps.go.id/id/statistics-table/2/${encodeURIComponent(tableId)}` : null,
+      href,
     };
   }
   if (!source.document_id) {

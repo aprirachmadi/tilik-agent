@@ -14,7 +14,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
 from tilik_agent.agent.runner import (
@@ -28,6 +28,7 @@ from tilik_agent.agent.runner import (
 from tilik_agent.agent.schemas import ChatTurn
 from tilik_agent.agent.tracing import current_trace_id
 from tilik_agent.chat.models import Conversation, Message
+from tilik_agent.ingestion.models import Dataset
 from tilik_agent.chat.storage import (
     append_turn,
     conversation_title_from_question,
@@ -150,6 +151,7 @@ def _response(conversation_id: str, result: QuestionResult) -> QuestionResponse:
 
 def _save_turn(conversation_id: str, question: str, result: QuestionResult) -> QuestionResponse:
     with _db_session() as session:
+        result.sources = _with_tablesource(session, result.sources)
         append_turn(
             session,
             conversation_id,
@@ -165,13 +167,39 @@ def _save_turn(conversation_id: str, question: str, result: QuestionResult) -> Q
     return _response(conversation_id, result)
 
 
-def _message_response(row: Message) -> ConversationMessage:
+def _with_tablesource(session: Session, sources: list[Any]) -> list[dict[str, Any]]:
+    """Copy source chips and fill tablesource from dataset when an older chip omitted it."""
+    copied = [dict(source) for source in sources if isinstance(source, dict)]
+    missing = {
+        int(source["dataset_id"])
+        for source in copied
+        if source.get("kind") == "dataset"
+        and not str(source.get("tablesource") or "").strip()
+        and source.get("dataset_id") is not None
+    }
+    if not missing:
+        return copied
+    rows = session.execute(select(Dataset.id, Dataset.tablesource).where(Dataset.id.in_(missing))).all()
+    found = {int(row.id): str(row.tablesource) for row in rows}
+    for source in copied:
+        if source.get("kind") != "dataset" or str(source.get("tablesource") or "").strip():
+            continue
+        raw_id = source.get("dataset_id")
+        if raw_id is None:
+            continue
+        tablesource = found.get(int(raw_id))
+        if tablesource:
+            source["tablesource"] = tablesource
+    return copied
+
+
+def _message_response(session: Session, row: Message) -> ConversationMessage:
     return ConversationMessage(
         id=row.id,
         role=row.role,
         content=row.content,
         chart=row.chart,
-        sources=list(row.sources or []),
+        sources=_with_tablesource(session, list(row.sources or [])),
         source_route=row.source_route,
         chart_error=row.chart_error,
         created_at=row.created_at,
@@ -204,7 +232,7 @@ def conversation(conversation_id: str) -> ConversationDetail:
         row, messages = loaded
         return ConversationDetail(
             **_summary(row).model_dump(),
-            messages=[_message_response(message) for message in messages],
+            messages=[_message_response(session, message) for message in messages],
         )
 
 

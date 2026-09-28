@@ -122,6 +122,7 @@ def cited_sources(state: State) -> list[dict[str, Any]]:
                 "kind": "dataset",
                 "dataset_id": dataset_id,
                 "bps_table_id": dataset.get("bps_table_id"),
+                "tablesource": dataset.get("tablesource"),
                 "title": dataset.get("title"),
             }
         )
