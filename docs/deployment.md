@@ -115,7 +115,7 @@ Use this restore command only on the new, empty server database. `--clean --if-e
 
 ```bash
 docker compose exec -T postgres psql -U tilik -d tilik -c "SELECT count(*) FROM observation;"
-docker compose exec -T postgres psql -U tilik -d tilik -c "SELECT c.name, count(e.uuid) AS embeddings FROM langchain_pg_collection c LEFT JOIN langchain_pg_embedding e ON e.collection_id = c.uuid GROUP BY c.name;"
+docker compose exec -T postgres psql -U tilik -d tilik -c "SELECT c.name, count(e.collection_id) AS embeddings FROM langchain_pg_collection c LEFT JOIN langchain_pg_embedding e ON e.collection_id = c.uuid GROUP BY c.name;"
 docker compose exec -T postgres psql -U tilik -d tilik -c "SELECT version_num FROM alembic_version;"
 ```
 
