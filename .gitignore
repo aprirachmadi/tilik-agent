@@ -48,8 +48,5 @@ env/
 
 data/
 docs/
-!docs/
-docs/*
-!docs/deployment.md
 .DS_Store
 Thumbs.db

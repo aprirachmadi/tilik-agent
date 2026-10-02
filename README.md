@@ -24,7 +24,6 @@ Tilik plans the work, looks up figures in Postgres, searches the publication in 
 - [Configuration](#configuration)
 - [Benchmark](#benchmark)
 - [Ingest](#ingest)
-- [Deploy](docs/deployment.md)
 
 ## Quick start
 
