@@ -24,6 +24,7 @@ Tilik plans the work, looks up figures in Postgres, searches the publication in 
 - [Configuration](#configuration)
 - [Benchmark](#benchmark)
 - [Ingest](#ingest)
+- [Deploy](docs/deployment.md)
 
 ## Quick start
 
@@ -41,12 +42,11 @@ Fill in `.env` before serving. The API listens on [http://127.0.0.1:4321](http:/
 | --- | --- |
 | `OPENAI_API_KEY` | Chat model. `configs/default.yaml` names this variable in `llm.api_key_env`. |
 | `SQL_AGENT_PASSWORD` | Read-only `sql_agent` role used while answering. |
+| `POSTGRES_PASSWORD` | Password for the `tilik` database role. Required. |
 | `BPS_API_KEY` | Catalog and table ingest. |
 | `LANGFUSE_PUBLIC_KEY` | Question traces. Leave empty to answer without sending a trace. |
 | `LANGFUSE_SECRET_KEY` | Question traces, paired with the public key. |
-| `LANGFUSE_BASE_URL` | Langfuse host. Local Compose serves it at `http://localhost:3000`. |
-
-The first boot of the Langfuse services creates the project `tilik`. Sign in at [http://localhost:3000](http://localhost:3000) as `tilik@example.com` with password `tilik`.
+| `LANGFUSE_BASE_URL` | Optional Langfuse host for question traces. |
 
 `notebooks/test_e2e_agent.ipynb` streams the same graph and draws the chart with Plotly.
 
@@ -62,7 +62,7 @@ Open [http://localhost:5173](http://localhost:5173). The dev server proxies `/ap
 
 ## Pipeline
 
-`compile_graph()` in `tilik_agent.agent` builds the graph below. `plan_question` returns a short plan whose steps are `sql_lookup`, `retrieve_sp2020`, or `calculate`. A `both` plan runs the retrieval and SQL loops. A calculation waits until the steps it depends on have finished.
+`compile_graph()` in `tilik_agent.agent` builds the graph below. `plan_question` returns a short plan whose steps are `sql_lookup`, `retrieve_document`, or `calculate`. A `both` plan runs the retrieval and SQL loops. A calculation waits until the steps it depends on have finished.
 
 ```mermaid
 flowchart TD
@@ -78,7 +78,7 @@ flowchart TD
     MIX --> S
 
     subgraph retrieval [Retrieval]
-        R --> SEARCH[Search SP2020 excerpts]
+        R --> SEARCH[Search publication excerpts]
         SEARCH --> GRADE[Grade each excerpt]
         GRADE -->|Relevant| RDOC[Return excerpts and sources]
         GRADE -->|None relevant, rewrites left| REWRITE[Rewrite the search query]
@@ -117,15 +117,15 @@ flowchart TD
 | Route | What runs |
 | --- | --- |
 | `data` | SQL lookups only. |
-| `context` | SP2020 search only. |
-| `both` | The plan's mix of SQL lookups and SP2020 search. |
-| `direct` | No SQL or SP2020 lookup is needed; the answer writer responds from conversation and any gathered evidence. |
+| `context` | Search the configured publication collection only. |
+| `both` | The plan's mix of SQL lookups and publication search. |
+| `direct` | No SQL or publication lookup is needed; the answer writer responds from conversation and any gathered evidence. |
 | `plan_failed` | The plan did not validate, so the run goes straight to an answer that says so. |
 
 | Step | What it does |
 | --- | --- |
 | `sql_lookup` | Inner tool agent. It may call `search_datasets`, `describe_dataset`, and `get_observations` through the read-only `sql_agent` role. Values are harvested from the tool results. The agent's reply is only a status. |
-| `retrieve_sp2020` | Searches the pgvector collection, grades each excerpt, and rewrites the query up to `retrieval.max_rewrites` times. |
+| `retrieve_document` | Searches the configured pgvector collection, grades each excerpt, and rewrites the query up to `retrieval.max_rewrites` times. |
 | `calculate` | Proposes arithmetic over observation ids. The result is checked against the stored values before it is kept. |
 | `write_answer` | Writes the answer from the gathered evidence. |
 | `build_chart` | Adds a chart spec when the question asks for a comparison and at least two cited values exist. The graph returns the spec and does not open a figure. |
@@ -171,12 +171,12 @@ curl.exe --% -s -X POST http://127.0.0.1:4321/questions -H "Content-Type: applic
 | `answer` | Text shown to the user. |
 | `chart` | Chart spec, or `null`. |
 | `answer_observation_ids` | Observation ids cited in the answer. |
-| `answer_document_ids` | SP2020 document ids cited in the answer. |
+| `answer_document_ids` | Publication document ids cited in the answer. |
 | `step_status` | Status of each planned step. |
 | `plan_error` | Set when the plan could not be validated. |
 | `sql_error` | Set when a SQL step failed. |
 | `sql_warnings` | Non-fatal SQL notes, such as a tool-round cap. |
-| `retrieval_error` | Set when SP2020 search failed. |
+| `retrieval_error` | Set when publication search failed. |
 
 A chart spec has `type` (`bar` or `line`), `title`, `x_axis`, `y_axis`, and `data`. Each point has `label`, `series`, `value`, `unit`, and `observation_id`.
 
@@ -199,9 +199,9 @@ These variables override the file when they are set:
 | --- | --- |
 | `TILIK_MODEL` | `llm.model` |
 | `TILIK_LLM_BASE_URL` | `llm.base_url` |
-| `SP2020_COLLECTION` | `retrieval.collection` |
-| `PGVECTOR_CONNECTION` | pgvector URL. The default is the local `tilik` database. |
-| `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB` | Observation database used by SQL lookup. |
+| `RETRIEVAL_COLLECTION` | `retrieval.collection`. `SP2020_COLLECTION` remains accepted for existing environments. |
+| `PGVECTOR_CONNECTION` | Optional pgvector URL. When unset, the app uses the same URL as the observation database. |
+| `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` | Observation database used by SQL lookup. The password is required in `.env`. |
 
 Secrets stay in `.env`. The yaml file only names the API-key variable.
 
@@ -217,10 +217,11 @@ When both Langfuse keys are set, the command upserts that JSON file into a Langf
 
 ## Ingest
 
-Ingest writes through `database_url` (`postgresql+psycopg://tilik:tilik@localhost:5432/tilik` by default). That role is separate from the read-only `sql_agent` role used by questions.
+Ingest writes through `database_url`, built from `POSTGRES_USER`, `POSTGRES_PASSWORD`, and the host settings in `.env`. That role is separate from the read-only `sql_agent` role used by questions.
 
 | Command | Effect |
 | --- | --- |
 | `poetry run tilik ingest catalog` | Load the national BPS subject catalog. |
 | `poetry run tilik ingest run` | Load every catalogued table. A stopped run resumes finished periods. |
 | `poetry run tilik ingest table --id <bps-table-id>` | Load one catalogued table, including every published year. |
+| `poetry run tilik ingest pdf --pdf <path> --collection <name>` | Chunk any text PDF and replace the named pgvector collection. Set `RETRIEVAL_COLLECTION` to that name when the question agent should search it. |

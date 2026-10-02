@@ -1,4 +1,4 @@
-"""LLM client, SP2020 vector store, and evidence formatting from the end-to-end notebook."""
+"""LLM client, publication vector store, and evidence formatting."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from pydantic import BaseModel
 
 from tilik_agent.agent.schemas import State
 from tilik_agent.agent.tracing import current_callbacks
-from tilik_agent.config import LlmConfig, get_agent_config
+from tilik_agent.config import LlmConfig, get_agent_config, vector_connection
 
 SchemaT = TypeVar("SchemaT", bound=BaseModel)
 
@@ -48,10 +48,7 @@ def get_vector_store() -> PGVector:
     """Return one vector store, rebuilding it when embedding or collection settings change."""
     global _vector_store, _vector_store_key
     config = get_agent_config()
-    connection = os.getenv(
-        "PGVECTOR_CONNECTION",
-        "postgresql+psycopg://tilik:tilik@localhost:5431/tilik",
-    )
+    connection = vector_connection()
     key = (
         config.embedding.model,
         config.embedding.device,

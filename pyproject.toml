@@ -60,6 +60,8 @@ qdrant-client = "^1.15"
 langchain-qdrant = "^0.2"
 langchain-postgres = "^0.0.16"
 psycopg = { version = "^3.2", extras = ["binary"] }
+torch = { version = "2.14.0+cpu", source = "pytorch-cpu" }
+torchvision = { version = "0.29.0+cpu", source = "pytorch-cpu" }
 
 # API / service surface for the agent
 fastapi = "^0.115"
@@ -86,6 +88,11 @@ mypy = "^1.14"
 types-requests = "^2.32"
 pandas-stubs = "^2.2"
 ipykernel = "^7.3.0"
+
+[[tool.poetry.source]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+priority = "explicit"
 
 [tool.poetry.scripts]
 tilik = "tilik_agent.cli:app"

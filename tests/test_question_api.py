@@ -17,9 +17,9 @@ from tilik_agent.agent.runner import cited_sources, question_result, run_questio
 from tilik_agent.agent.schemas import State
 from tilik_agent.api import app, status_lines
 from tilik_agent.chat.models import Conversation, Message
-from tilik_agent.ingestion.models import Dataset
 from tilik_agent.chat.storage import list_conversations, load_full_thread
 from tilik_agent.config import get_agent_config
+from tilik_agent.ingestion.models import Dataset
 
 
 class _Graph:
@@ -73,7 +73,7 @@ def test_stream_question_yields_inner_sql_updates(monkeypatch: pytest.MonkeyPatc
     assert run_question("berapa").answer == "Papua 6,96"
 
 
-def test_questions_returns_answer_and_chart(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_questions_returns_answer_and_chart(monkeypatch: pytest.MonkeyPatch, chat_db: Session) -> None:
     """
     Condition:
     The question endpoint streams a graph that writes an answer and a chart spec.

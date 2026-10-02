@@ -15,6 +15,7 @@ import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import yaml
 from dotenv import load_dotenv
@@ -28,6 +29,8 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     bps_api_key: str = ""
+    postgres_user: str = "tilik"
+    postgres_password: str = ""
     postgres_host: str = "localhost"
     postgres_port: int = 5432
     postgres_db: str = "tilik"
@@ -38,9 +41,12 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def default_database_url(self) -> Settings:
-        if not self.database_url:
+        if not self.database_url and self.postgres_password:
+            user = quote(self.postgres_user, safe="")
+            password = quote(self.postgres_password, safe="")
             self.database_url = (
-                f"postgresql+psycopg://tilik:tilik@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
+                f"postgresql+psycopg://{user}:{password}@"
+                f"{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
             )
         return self
 
@@ -176,6 +182,14 @@ def get_settings() -> Settings:
     return Settings()
 
 
+def vector_connection() -> str:
+    """Return the configured pgvector URL, defaulting to the application database."""
+    connection = os.getenv("PGVECTOR_CONNECTION", "").strip() or get_settings().database_url
+    if not connection:
+        raise RuntimeError("Set PGVECTOR_CONNECTION or POSTGRES_PASSWORD in .env")
+    return connection
+
+
 _yaml_mtime_ns: int | None = None
 _yaml_config: AgentConfig | None = None
 
@@ -205,7 +219,7 @@ def get_agent_config() -> AgentConfig:
     if base_url:
         llm_updates["base_url"] = base_url
     retrieval_updates: dict[str, str] = {}
-    collection = os.getenv("SP2020_COLLECTION")
+    collection = os.getenv("RETRIEVAL_COLLECTION") or os.getenv("SP2020_COLLECTION")
     if collection:
         retrieval_updates["collection"] = collection
     return config.model_copy(

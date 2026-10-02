@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import structlog
 import typer
 from sqlalchemy import create_engine
@@ -15,6 +17,8 @@ app = typer.Typer(no_args_is_help=True, pretty_exceptions_show_locals=False, hel
 ingest_app = typer.Typer(no_args_is_help=True, help="Load BPS statistical tables into Postgres")
 app.add_typer(ingest_app, name="ingest")
 
+_PDF = typer.Option(..., "--pdf", help="PDF to chunk into a pgvector collection")
+_COLLECTION = typer.Option(..., "--collection", help="Target pgvector collection to replace")
 
 def _configure_logging() -> None:
     structlog.configure(
@@ -62,6 +66,27 @@ def ingest_table(table_id: str = typer.Option(..., "--id", help="BPS table id fr
     _echo_report(report)
     if report.failed:
         raise typer.Exit(code=1)
+
+
+@ingest_app.command("pdf")
+def ingest_pdf_command(
+    pdf: Path = _PDF,
+    collection: str = _COLLECTION,
+) -> None:
+    """Chunk a PDF into a pgvector collection."""
+    if not pdf.is_file():
+        typer.echo(f"PDF not found: {pdf}", err=True)
+        raise typer.Exit(code=1)
+    if not collection.strip():
+        raise typer.BadParameter("Collection name cannot be empty", param_hint="--collection")
+    from tilik_agent.ingestion.pdf_vectors import ingest_pdf
+
+    try:
+        count = ingest_pdf(pdf, collection=collection)
+    except RuntimeError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+    typer.echo(f"PDF chunks in {collection}: {count}")
 
 
 def _load(*, table_id: str | None) -> IngestReport:

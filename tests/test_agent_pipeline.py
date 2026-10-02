@@ -76,8 +76,8 @@ def test_route_sources(state: dict[str, Any], expected: str) -> None:
 @pytest.mark.parametrize(
     ("actions", "expected"),
     [
-        (("sql_lookup", "retrieve_sp2020"), "both"),
-        (("retrieve_sp2020",), "context"),
+        (("sql_lookup", "retrieve_document"), "both"),
+        (("retrieve_document",), "context"),
         (("sql_lookup",), "data"),
         (("sql_lookup", "calculate"), "data"),
     ],
@@ -400,7 +400,7 @@ def test_execute_plan_marks_partial_evidence(monkeypatch: pytest.MonkeyPatch) ->
         return {"documents": [{"id": "d1", "step_id": step.id}], "retrieval_error": "none graded"}
 
     monkeypatch.setattr("tilik_agent.agent.workers._retrieve_step", retrieve_step)
-    result = _execute_plan({"question": "berapa", "plan": _plan("retrieve_sp2020")})
+    result = _execute_plan({"question": "berapa", "plan": _plan("retrieve_document")})
     assert result["step_status"]["s1"]["status"] == "partial"
     assert result["documents"] == [{"id": "d1", "step_id": "s1"}]
 

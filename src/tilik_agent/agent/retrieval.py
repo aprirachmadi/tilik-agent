@@ -1,4 +1,4 @@
-"""SP2020 search, grade, and rewrite loop from the end-to-end notebook."""
+"""Publication search, grade, and rewrite loop."""
 
 from __future__ import annotations
 
@@ -48,7 +48,7 @@ Excerpt: {doc.page_content[:800]}"""
             if rewrite_count < retrieval.max_rewrites:
                 query = (
                     llm_text(
-                        "Rewrite only this search query for the SP2020 demography publication. "
+                        "Rewrite only this search query for the configured publication. "
                         f"Return only the query. Original request: {question}. Current query: {query}"
                     )
                     .strip()
@@ -58,7 +58,7 @@ Excerpt: {doc.page_content[:800]}"""
         return {
             "documents": [],
             "search_query": query,
-            "retrieval_error": f"No relevant SP2020 excerpts found after {retrieval.max_rewrites} rewrites",
+            "retrieval_error": f"No relevant publication excerpts found after {retrieval.max_rewrites} rewrites",
         }
     except (psycopg.Error, SQLAlchemyError, ConnectionError, TimeoutError, OSError, APIError) as exc:
         return {"documents": [], "search_query": query, "retrieval_error": str(exc)}

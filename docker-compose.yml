@@ -1,14 +1,98 @@
 services:
   postgres:
     image: pgvector/pgvector:pg16
-    ports:
-      - "5431:5432"
+    restart: unless-stopped
     environment:
-      POSTGRES_USER: tilik
-      POSTGRES_PASSWORD: tilik
-      POSTGRES_DB: tilik
+      POSTGRES_USER: ${POSTGRES_USER:-tilik}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-tilik}
+      SQL_AGENT_PASSWORD: ${SQL_AGENT_PASSWORD:?Set SQL_AGENT_PASSWORD in .env}
     volumes:
       - pgvector_storage:/var/lib/postgresql/data
+      - ./deploy/postgres/init-db.sh:/docker-entrypoint-initdb.d/01-init-db.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: ${POSTGRES_USER:-tilik}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-tilik}
+      SQL_AGENT_PASSWORD: ${SQL_AGENT_PASSWORD:?Set SQL_AGENT_PASSWORD in .env}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?Set OPENAI_API_KEY in .env}
+      BPS_API_KEY: ${BPS_API_KEY:-}
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
+      LANGFUSE_BASE_URL: ${LANGFUSE_BASE_URL:-}
+      TILIK_MODEL: ${TILIK_MODEL:-}
+      TILIK_LLM_BASE_URL: ${TILIK_LLM_BASE_URL:-}
+      RETRIEVAL_COLLECTION: ${RETRIEVAL_COLLECTION:-}
+      SP2020_COLLECTION: ${SP2020_COLLECTION:-}
+      HF_HOME: /cache/huggingface
+    volumes:
+      - hf_cache:/cache/huggingface
+      - bps_raw:/app/data/bps/raw
+      - ./data/docs:/app/data/docs:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4321/health')",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 90s
+
+  web:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-tilikagent.frhvn.my.id}
+    volumes:
+      - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      web:
+        condition: service_healthy
 
 volumes:
   pgvector_storage:
+  hf_cache:
+  bps_raw:
+  caddy_data:
+  caddy_config:

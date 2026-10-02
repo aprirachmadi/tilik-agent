@@ -16,13 +16,14 @@ from tilik_agent.agent.schemas import Analysis, PlanStep, State, WorkPlan
 from tilik_agent.agent.sql import _sql_step
 from tilik_agent.agent.tracing import bind_trace_context
 
+
 def plan_question(state: State) -> dict[str, Any]:
     original_question = state.get("original_question") or state["question"]
     history = state.get("history") or []
     prompt = f"""Plan source work for a BPS statistics assistant. Return a WorkPlan.
-Allowed actions: sql_lookup, retrieve_sp2020, calculate. No web lookup exists.
-SQL has BPS observation tables; retrieve_sp2020 has only the SP2020 demography
-publication and cannot answer 2024-2025 questions.
+Allowed actions: sql_lookup, retrieve_document, calculate. No web lookup exists.
+SQL has BPS observation tables; retrieve_document searches only the configured
+publication collection and cannot answer questions outside its content.
 Keep dependencies in depends_on. The SQL agent can perform several dependent
 dataset lookups in ONE sql_lookup step; prefer that for a SQL-only question.
 Do not create calculate steps when the SQL agent can select a ranking as part
@@ -31,7 +32,7 @@ Never assume that a document search can provide a missing SQL value.
 Set WorkPlan.question to a standalone version of the latest user message. When
 recent conversation is present, resolve follow-ups such as "what about 2024?"
 into a full question with place, indicator, and period.
-Return steps: [] when the latest message needs no new BPS SQL or SP2020 lookup
+Return steps: [] when the latest message needs no new BPS SQL or publication lookup
 (greetings, who are you, or confirming numbers already stated in the conversation).
 When steps is empty, requested_chart must be false.
 {history_block(history, "Recent conversation")}Latest user message: {original_question}"""
@@ -53,9 +54,9 @@ When steps is empty, requested_chart must be false.
             actions = {step.action for step in plan.steps}
             route: Literal["context", "data", "both"] = (
                 "both"
-                if {"sql_lookup", "retrieve_sp2020"} <= actions
+                if {"sql_lookup", "retrieve_document"} <= actions
                 else "context"
-                if "retrieve_sp2020" in actions
+                if "retrieve_document" in actions
                 else "data"
             )
             return {
@@ -146,7 +147,7 @@ def _execute_plan(state: State) -> dict[str, Any]:
             )
             if step.action == "sql_lookup":
                 return step.id, _sql_step(step, state["question"], context if step.depends_on else "")
-            if step.action == "retrieve_sp2020":
+            if step.action == "retrieve_document":
                 return step.id, _retrieve_step(step, state["question"], context if step.depends_on else "")
             return step.id, _calculate_step(step, aggregate)
 

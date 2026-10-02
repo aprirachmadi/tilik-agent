@@ -6,7 +6,7 @@ from typing import Any, Literal, TypedDict
 
 from pydantic import BaseModel, Field, model_validator
 
-Action = Literal["sql_lookup", "retrieve_sp2020", "calculate"]
+Action = Literal["sql_lookup", "retrieve_document", "calculate"]
 
 
 class PlanStep(BaseModel):

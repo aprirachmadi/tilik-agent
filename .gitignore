@@ -3,6 +3,10 @@
 .env.*
 !.env.example
 
+# Database dumps and local publications. Never commit these.
+*.dump
+data/docs/*.pdf
+
 # Local-only scripts
 scripts/
 
@@ -44,5 +48,8 @@ env/
 
 data/
 docs/
+!docs/
+docs/*
+!docs/deployment.md
 .DS_Store
 Thumbs.db

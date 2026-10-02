@@ -12,9 +12,9 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, select, text
 from sqlalchemy.orm import Session
 
 from tilik_agent.agent.runner import (
@@ -28,7 +28,6 @@ from tilik_agent.agent.runner import (
 from tilik_agent.agent.schemas import ChatTurn
 from tilik_agent.agent.tracing import current_trace_id
 from tilik_agent.chat.models import Conversation, Message
-from tilik_agent.ingestion.models import Dataset
 from tilik_agent.chat.storage import (
     append_turn,
     conversation_title_from_question,
@@ -38,6 +37,7 @@ from tilik_agent.chat.storage import (
     load_history,
 )
 from tilik_agent.config import get_settings
+from tilik_agent.ingestion.models import Dataset
 
 _FRONTEND_ORIGINS = ("http://localhost:5173", "http://127.0.0.1:5173")
 _SOURCE_NODES = ("run_sql", "run_retrieval", "run_both")
@@ -213,6 +213,17 @@ def _summary(conversation: Conversation) -> ConversationSummary:
         created_at=conversation.created_at,
         updated_at=conversation.updated_at,
     )
+
+
+@app.get("/health")
+def health() -> JSONResponse:
+    """Report whether the API can run a query against Postgres."""
+    try:
+        with _engine().connect() as connection:
+            connection.execute(text("SELECT 1"))
+    except Exception:
+        return JSONResponse({"status": "unavailable"}, status_code=503)
+    return JSONResponse({"status": "ok"})
 
 
 @app.get("/conversations")
