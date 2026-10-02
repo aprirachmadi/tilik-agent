@@ -41,5 +41,8 @@ env/
 # Editors and OS files
 .idea/
 .vscode/
+
+data/
+docs/
 .DS_Store
 Thumbs.db
