@@ -1,4 +1,4 @@
-"""Load the JSON question file that ``tilik eval`` upserts into Langfuse."""
+"""Load the JSON question file that ``tilik benchmark`` upserts into Langfuse."""
 
 from __future__ import annotations
 

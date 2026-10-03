@@ -140,7 +140,7 @@ class EvalsMetricsConfig(BaseModel):
 
 
 class EvalsConfig(BaseModel):
-    """Judge model and metric switches for ``tilik eval``."""
+    """Judge model and metric switches for ``tilik benchmark``."""
 
     model_config = ConfigDict(extra="forbid")
 

@@ -97,8 +97,8 @@ def _load(*, table_id: str | None) -> IngestReport:
         return ingest_datasets(session, client, raw_store=raw_store, table_id=table_id)
 
 
-@app.command("eval")
-def evaluate() -> None:
+@app.command("benchmark")
+def benchmark() -> None:
     """Score every question in the question file with the judges."""
     from tilik_agent.evals.runner import run_benchmark
 

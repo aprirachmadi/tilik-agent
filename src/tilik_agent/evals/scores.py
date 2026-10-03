@@ -1,4 +1,4 @@
-"""Turn a finished question into the scores ``tilik eval`` prints and uploads."""
+"""Turn a finished question into the scores ``tilik benchmark`` prints and uploads."""
 
 from __future__ import annotations
 
