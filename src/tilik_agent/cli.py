@@ -98,11 +98,13 @@ def _load(*, table_id: str | None) -> IngestReport:
 
 
 @app.command("benchmark")
-def benchmark() -> None:
-    """Score every question in the question file with the judges."""
-    from tilik_agent.evals.runner import run_benchmark
+def benchmark(
+    conversations: bool = typer.Option(False, "--conversations", help="Score scripted multi-turn conversations"),
+) -> None:
+    """Score the question file or scripted conversations with the enabled judges."""
+    from tilik_agent.evals.runner import run_benchmark, run_conversation_benchmark
 
-    typer.echo(run_benchmark())
+    typer.echo(run_conversation_benchmark() if conversations else run_benchmark())
 
 
 @app.command("serve")

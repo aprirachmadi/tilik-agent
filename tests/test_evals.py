@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 from deepeval.models import DeepEvalBaseLLM
-from deepeval.test_case import LLMTestCase
+from deepeval.test_case import ConversationalTestCase, LLMTestCase
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.tools import tool
 from langgraph.graph import END, START, MessagesState, StateGraph
@@ -23,11 +23,17 @@ from tilik_agent.config import (
     StatusMetricConfig,
     get_agent_config,
 )
-from tilik_agent.evals.dataset import load_benchmark, parse_benchmark
+from tilik_agent.evals.dataset import ConversationItem, load_benchmark, load_conversations, parse_benchmark
 from tilik_agent.evals.judge import AgentJudgeLlm
-from tilik_agent.evals.langfuse_dataset import sync_benchmark
-from tilik_agent.evals.metrics import argument_correctness_metric, task_completion_metric
-from tilik_agent.evals.runner import _prune, score_question
+from tilik_agent.evals.langfuse_dataset import sync_benchmark, sync_conversations
+from tilik_agent.evals.metrics import argument_correctness_metric, conversation_metrics, task_completion_metric
+from tilik_agent.evals.runner import (
+    _enabled_conversation_names,
+    _prune,
+    _run_conversations_published,
+    score_conversation,
+    score_question,
+)
 from tilik_agent.evals.scores import ItemScore, assemble_scores, pipeline_status_label
 
 
@@ -344,3 +350,141 @@ def test_loaded_config_enables_the_three_metrics() -> None:
     assert metrics.task_completion.enabled is True
     assert metrics.argument_correctness.threshold == 0.5
     assert metrics.pipeline_status.enabled is True
+
+
+def test_conversation_dataset_and_default_metric_switches() -> None:
+    dataset = load_conversations()
+    assert dataset.name == "demografi-sosial-conversations"
+    assert [len(item.user_turns) for item in dataset.items] == [3, 2, 2, 2]
+    assert len({item.id for item in dataset.items}) == len(dataset.items)
+    assert _enabled_conversation_names() == [
+        "goal_accuracy", "tool_use", "conversation_completeness", "pipeline_status"
+    ]
+    with pytest.raises(ValidationError):
+        ConversationItem(id="x", scenario="test", expected_outcome="test", user_turns=[])
+
+
+def test_conversation_replays_generated_history_and_scores_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    histories: list[list[dict[str, str]]] = []
+    sessions: list[str | None] = []
+    measured: dict[str, list[ConversationalTestCase]] = {}
+
+    def agent(question: str, *, history: list[dict[str, str]], conversation_id: str,
+              callbacks: Sequence[Any]) -> QuestionResult:
+        histories.append([dict(turn) for turn in history])
+        sessions.append(conversation_id)
+        result = _run_with_one_tool_call(question, callbacks=callbacks)
+        result.answer = f"generated {len(histories)}"
+        result.step_status = {"s1": {"status": "failed" if len(histories) == 2 else "succeeded",
+                                     "error": "lookup failed" if len(histories) == 2 else ""}}
+        return result
+
+    def fake_metrics(*args: Any, **kwargs: Any) -> dict[str, _CapturingMetric]:
+        names = ["goal_accuracy", "tool_use", "conversation_completeness"]
+        return {name: _CapturingMetric(measured.setdefault(name, [])) for name in names}
+
+    monkeypatch.setattr("tilik_agent.evals.runner.run_question", agent)
+    monkeypatch.setattr("tilik_agent.evals.runner.conversation_metrics", fake_metrics)
+    item = ConversationItem(
+        id="c", scenario="follow up", expected_outcome="human-only description",
+        user_turns=["August?", "February?", "Difference?"],
+    )
+    case, scores = score_conversation(item, _DummyJudge(), session_id="one-session")
+    assert histories == [
+        [],
+        [{"role": "user", "content": "August?"}, {"role": "assistant", "content": "generated 1"}],
+        [{"role": "user", "content": "August?"}, {"role": "assistant", "content": "generated 1"},
+         {"role": "user", "content": "February?"}, {"role": "assistant", "content": "generated 2"}],
+    ]
+    assert sessions == ["one-session"] * 3
+    assert [(turn.role, turn.content) for turn in case.turns] == [
+        ("user", "August?"), ("assistant", "generated 1"),
+        ("user", "February?"), ("assistant", "generated 2"),
+        ("user", "Difference?"), ("assistant", "generated 3"),
+    ]
+    assert all(turn.tools_called[0].name == "search_datasets" for turn in case.turns[1::2])
+    assert all(turn.tools_called[0].description for turn in case.turns[1::2])
+    assert {name: len(cases) for name, cases in measured.items()} == {
+        "goal_accuracy": 1, "tool_use": 1, "conversation_completeness": 1
+    }
+    assert [score.name for score in scores] == [
+        "goal_accuracy", "tool_use", "conversation_completeness", "pipeline_status"
+    ]
+    assert scores[-1].value == "failed"
+    assert "turn 2: lookup failed" in scores[-1].comment
+
+
+def test_conversation_metric_builder_uses_all_sql_tools_and_optional_relevancy() -> None:
+    config = get_agent_config().evals.conversation_metrics.model_copy(deep=True)
+    judge = _DummyJudge()
+    built = conversation_metrics(config, judge, history_messages=6)
+    assert list(built) == ["goal_accuracy", "tool_use", "conversation_completeness"]
+    assert {tool.name for tool in built["tool_use"].available_tools} == {
+        "search_datasets", "describe_dataset", "get_observations"
+    }
+    assert all(tool.description for tool in built["tool_use"].available_tools)
+    config.turn_relevancy.enabled = True
+    built = conversation_metrics(config, judge, history_messages=6)
+    assert built["turn_relevancy"].window_size == 4
+
+
+def test_sync_conversation_dataset_stores_script_and_human_context() -> None:
+    dataset = load_conversations()
+
+    class _Client:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, Any]] = []
+
+        def get_dataset(self, name: str) -> SimpleNamespace:
+            return SimpleNamespace(items=[])
+
+        def create_dataset_item(self, **kwargs: Any) -> SimpleNamespace:
+            self.calls.append(kwargs)
+            return SimpleNamespace(id=kwargs["id"])
+
+    client = _Client()
+    items = sync_conversations(client, dataset)
+    assert len(items) == len(dataset.items)
+    first = client.calls[0]
+    assert first["input"] == dataset.items[0].user_turns
+    assert first["expected_output"] == dataset.items[0].expected_outcome
+    assert first["metadata"]["scenario"] == dataset.items[0].scenario
+
+
+def test_published_conversation_run_outputs_generated_transcript(monkeypatch: pytest.MonkeyPatch) -> None:
+    dataset = load_conversations()
+    dataset.items = dataset.items[1:2]  # The two-turn case.
+    seen_outputs: list[dict[str, Any]] = []
+    sessions: list[str | None] = []
+
+    def agent(question: str, *, history: list[dict[str, str]], conversation_id: str,
+              callbacks: Sequence[Any]) -> QuestionResult:
+        sessions.append(conversation_id)
+        return QuestionResult(answer=f"answer {len(history) // 2 + 1}")
+
+    class _Client:
+        def get_dataset(self, name: str) -> SimpleNamespace:
+            return SimpleNamespace(items=[])
+
+        def create_dataset_item(self, **kwargs: Any) -> SimpleNamespace:
+            return SimpleNamespace(id=kwargs["id"], input=kwargs["input"], metadata=kwargs["metadata"])
+
+        def run_experiment(self, **kwargs: Any) -> SimpleNamespace:
+            for item in kwargs["data"]:
+                output = kwargs["task"](item=item)
+                seen_outputs.append(output)
+                evaluations = [evaluate(input=item.input, output=output, metadata=item.metadata)
+                               for evaluate in kwargs["evaluators"]]
+                assert [evaluation.name for evaluation in evaluations] == ["pipeline_status"]
+            return SimpleNamespace(dataset_run_url="https://langfuse.test/run")
+
+    monkeypatch.setattr("tilik_agent.evals.runner.run_question", agent)
+    monkeypatch.setattr("tilik_agent.evals.runner._enabled_conversation_names", lambda: ["pipeline_status"])
+    monkeypatch.setattr("langfuse.get_client", lambda: _Client())
+    report = _run_conversations_published(dataset, None)
+    assert report.count("pipeline_status:") == 1
+    assert "https://langfuse.test/run" in report
+    assert sessions[0] == sessions[1]
+    assert [turn["content"] for turn in seen_outputs[0]["turns"]] == [
+        dataset.items[0].user_turns[0], "answer 1", dataset.items[0].user_turns[1], "answer 2"
+    ]

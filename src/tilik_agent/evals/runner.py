@@ -7,21 +7,29 @@ normal question call. ``score_question`` scores a single question.
 from __future__ import annotations
 
 from typing import Any
+from uuid import uuid4
 
 from deepeval.integrations.langchain import CallbackHandler
-from deepeval.test_case import LLMTestCase
+from deepeval.test_case import ConversationalTestCase, LLMTestCase, Turn
 from deepeval.tracing import trace_manager
 
 from tilik_agent.agent.graph import compile_graph
 from tilik_agent.agent.runner import QuestionResult, run_question
+from tilik_agent.agent.schemas import ChatTurn
 from tilik_agent.agent.sql import SQL_TOOLS, get_sql_agent
 from tilik_agent.agent.tracing import langfuse_configured
 from tilik_agent.config import get_agent_config
-from tilik_agent.evals.dataset import BenchmarkDataset, load_benchmark
+from tilik_agent.evals.dataset import (
+    BenchmarkDataset,
+    ConversationDataset,
+    ConversationItem,
+    load_benchmark,
+    load_conversations,
+)
 from tilik_agent.evals.judge import AgentJudgeLlm
-from tilik_agent.evals.langfuse_dataset import sync_benchmark
-from tilik_agent.evals.metrics import argument_correctness_metric, task_completion_metric
-from tilik_agent.evals.scores import ItemScore, assemble_scores, format_report
+from tilik_agent.evals.langfuse_dataset import sync_benchmark, sync_conversations
+from tilik_agent.evals.metrics import argument_correctness_metric, conversation_metrics, task_completion_metric
+from tilik_agent.evals.scores import ItemScore, assemble_scores, format_report, pipeline_status_label
 
 _TOOL_DESCRIPTIONS = {tool.name: tool.description for tool in SQL_TOOLS}
 
@@ -40,6 +48,20 @@ def run_benchmark() -> str:
     return _run_published(dataset, judge)
 
 
+def run_conversation_benchmark() -> str:
+    """Replay scripted conversations and score each complete transcript once."""
+    dataset = load_conversations()
+    judge = build_conversation_judge()
+    if not langfuse_configured():
+        _progress(f"Scoring {len(dataset.items)} conversations")
+        rows = []
+        for item in dataset.items:
+            _, scores = _score_conversation_item(item, judge)
+            rows.append((item.id, scores))
+        return format_report(rows) + "\n\nLangfuse upload skipped"
+    return _run_conversations_published(dataset, judge)
+
+
 def _score_item(
     item_id: str, question: str, judge: AgentJudgeLlm | None
 ) -> tuple[QuestionResult, list[ItemScore]]:
@@ -56,6 +78,65 @@ def build_judge() -> AgentJudgeLlm | None:
     if metrics.task_completion.enabled or metrics.argument_correctness.enabled:
         return AgentJudgeLlm(config.evals.judge)
     return None
+
+
+def build_conversation_judge() -> AgentJudgeLlm | None:
+    """Build a judge only when a conversation judge metric is enabled."""
+    config = get_agent_config().evals
+    metrics = config.conversation_metrics
+    if any((metrics.goal_accuracy.enabled, metrics.tool_use.enabled,
+            metrics.conversation_completeness.enabled, metrics.turn_relevancy.enabled)):
+        return AgentJudgeLlm(config.judge)
+    return None
+
+
+def score_conversation(
+    item: ConversationItem, judge: AgentJudgeLlm | None, *, session_id: str | None = None
+) -> tuple[ConversationalTestCase, list[ItemScore]]:
+    """Generate all assistant turns before judging the full conversation."""
+    config = get_agent_config()
+    history: list[ChatTurn] = []
+    turns: list[Turn] = []
+    statuses: list[tuple[str, str]] = []
+    session_id = session_id or f"benchmark-{uuid4()}"
+    for number, question in enumerate(item.user_turns, start=1):
+        handler = CallbackHandler(name="tilik-benchmark-conversation")
+        _progress(f"  turn {number}: {question}")
+        result = run_question(question, history=history, conversation_id=session_id, callbacks=[handler])
+        answer = result.answer or ""
+        _progress(f"  answer:\n{answer}")
+        turns.extend((Turn(role="user", content=question), Turn(
+            role="assistant", content=answer, tools_called=_tools_called(handler)
+        )))
+        history.extend(({"role": "user", "content": question}, {"role": "assistant", "content": answer}))
+        statuses.append(pipeline_status_label(result.step_status, result.plan_error))
+    case = ConversationalTestCase(
+        scenario=item.scenario, expected_outcome=item.expected_outcome,
+        context=item.context, turns=turns,
+    )
+    scores: list[ItemScore] = []
+    if judge is not None:
+        _progress("  judging")
+        for name, metric in conversation_metrics(
+            config.evals.conversation_metrics, judge,
+            history_messages=config.conversation.max_history_messages,
+        ).items():
+            metric.measure(case)
+            scores.append(ItemScore(name, float(metric.score), metric.reason or "", "NUMERIC"))
+    if config.evals.conversation_metrics.pipeline_status.enabled:
+        label = min((status for status, _ in statuses), key={"failed": 0, "partial": 1, "succeeded": 2}.get)
+        comments = [f"turn {number}: {comment}" for number, (_, comment) in enumerate(statuses, start=1) if comment]
+        scores.append(ItemScore("pipeline_status", label, "; ".join(comments), "CATEGORICAL"))
+    return case, scores
+
+
+def _score_conversation_item(
+    item: ConversationItem, judge: AgentJudgeLlm | None
+) -> tuple[ConversationalTestCase, list[ItemScore]]:
+    _progress(f"[{item.id}] {item.scenario}")
+    case, scores = score_conversation(item, judge)
+    _progress(format_report([(item.id, scores)]))
+    return case, scores
 
 
 def score_question(question: str, judge: AgentJudgeLlm | None) -> tuple[QuestionResult, list[ItemScore]]:
@@ -107,12 +188,15 @@ def _argument_score(question: str, handler: CallbackHandler | None, judge: Agent
     metric = argument_correctness_metric(get_agent_config().evals.metrics, judge)
     if metric is None:
         raise RuntimeError("argument correctness was scored while disabled")
-    trace = _trace(handler)
-    calls = (trace.tools_called or []) if trace is not None else []
-    tools = [call.model_copy(update={"description": _TOOL_DESCRIPTIONS.get(call.name)}) for call in calls]
-    case = LLMTestCase(input=question, actual_output="", tools_called=tools)
+    case = LLMTestCase(input=question, actual_output="", tools_called=_tools_called(handler))
     metric.measure(case)
     return ItemScore("argument_correctness", float(metric.score), metric.reason or "", "NUMERIC")
+
+
+def _tools_called(handler: CallbackHandler | None) -> list[Any]:
+    trace = _trace(handler)
+    calls = (trace.tools_called or []) if trace is not None else []
+    return [call.model_copy(update={"description": _TOOL_DESCRIPTIONS.get(call.name)}) for call in calls]
 
 
 def _progress(message: str) -> None:
@@ -194,6 +278,40 @@ def _run_published(dataset: BenchmarkDataset, judge: AgentJudgeLlm | None) -> st
     return f"{report}\n\n{url}" if url else report
 
 
+def _run_conversations_published(dataset: ConversationDataset, judge: AgentJudgeLlm | None) -> str:
+    from langfuse import get_client
+
+    _progress("Connecting to Langfuse")
+    client = get_client()
+    _progress("Syncing the conversation file")
+    remote_items = sync_conversations(client, dataset)
+    _progress(f"Scoring {len(dataset.items)} conversations")
+    captured: dict[str, list[ItemScore]] = {}
+    by_id = {item.id: item for item in dataset.items}
+
+    def task(*, item: Any, **kwargs: Any) -> dict[str, Any]:
+        local = by_id[item.id]
+        case, scores = _score_conversation_item(local, judge)
+        captured[item.id] = scores
+        captured[str(item.input)] = scores
+        return {"turns": [{"role": turn.role, "content": turn.content} for turn in case.turns]}
+
+    evaluators = [_replay(name, captured) for name in _enabled_conversation_names()]
+    experiment = client.run_experiment(
+        name=dataset.name,
+        run_name=f"{dataset.name} {dataset.version}",
+        description="Referenceless multi-turn benchmark of the BPS question agent",
+        data=remote_items,
+        task=task,
+        evaluators=evaluators,
+        max_concurrency=1,
+        metadata={"version": dataset.version},
+    )
+    report = format_report([(item.id, captured[item.id]) for item in dataset.items])
+    url = experiment.dataset_run_url or ""
+    return f"{report}\n\n{url}" if url else report
+
+
 def _enabled_names() -> list[str]:
     metrics = get_agent_config().evals.metrics
     names: list[str] = []
@@ -204,6 +322,13 @@ def _enabled_names() -> list[str]:
     if metrics.pipeline_status.enabled:
         names.append("pipeline_status")
     return names
+
+
+def _enabled_conversation_names() -> list[str]:
+    metrics = get_agent_config().evals.conversation_metrics
+    return [name for name in (
+        "goal_accuracy", "tool_use", "conversation_completeness", "turn_relevancy", "pipeline_status"
+    ) if getattr(metrics, name).enabled]
 
 
 def _replay(name: str, captured: dict[str, list[ItemScore]]) -> Any:

@@ -50,3 +50,18 @@ evals:
     # Raw graph status (succeeded, partial, failed). Not an LLM-as-a-judge metric.
     pipeline_status:
       enabled: true
+  conversation_metrics:
+    goal_accuracy:
+      enabled: true
+      threshold: 0.5
+    tool_use:
+      enabled: true
+      threshold: 0.5
+    conversation_completeness:
+      enabled: true
+      threshold: 0.5
+    turn_relevancy:
+      enabled: false
+      threshold: 0.5
+    pipeline_status:
+      enabled: true

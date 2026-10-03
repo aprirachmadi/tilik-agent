@@ -139,6 +139,18 @@ class EvalsMetricsConfig(BaseModel):
     pipeline_status: StatusMetricConfig
 
 
+class ConversationMetricsConfig(BaseModel):
+    """Metric switches for the scripted multi-turn benchmark."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    goal_accuracy: JudgeMetricConfig
+    tool_use: JudgeMetricConfig
+    conversation_completeness: JudgeMetricConfig
+    turn_relevancy: JudgeMetricConfig
+    pipeline_status: StatusMetricConfig
+
+
 class EvalsConfig(BaseModel):
     """Judge model and metric switches for ``tilik benchmark``."""
 
@@ -146,6 +158,7 @@ class EvalsConfig(BaseModel):
 
     judge: LlmConfig
     metrics: EvalsMetricsConfig
+    conversation_metrics: ConversationMetricsConfig
 
 
 class AgentConfig(BaseModel):

@@ -6,7 +6,7 @@ from typing import Any
 
 from langfuse.api.commons.types.dataset_status import DatasetStatus
 
-from tilik_agent.evals.dataset import BenchmarkDataset
+from tilik_agent.evals.dataset import BenchmarkDataset, ConversationDataset
 
 
 def sync_benchmark(client: Any, dataset: BenchmarkDataset) -> list[Any]:
@@ -30,7 +30,27 @@ def sync_benchmark(client: Any, dataset: BenchmarkDataset) -> list[Any]:
     return created
 
 
-def _archive_removed(client: Any, dataset: BenchmarkDataset) -> None:
+def sync_conversations(client: Any, dataset: ConversationDataset) -> list[Any]:
+    """Upsert scripted conversations into a separate Langfuse dataset."""
+    try:
+        client.get_dataset(dataset.name)
+    except Exception:
+        client.create_dataset(name=dataset.name, description="Multi-turn demography and social statistics benchmark")
+    created = [
+        client.create_dataset_item(
+            dataset_name=dataset.name,
+            id=item.id,
+            input=item.user_turns,
+            expected_output=item.expected_outcome,
+            metadata={"benchmark_id": item.id, "version": dataset.version, "scenario": item.scenario},
+        )
+        for item in dataset.items
+    ]
+    _archive_removed(client, dataset)
+    return created
+
+
+def _archive_removed(client: Any, dataset: BenchmarkDataset | ConversationDataset) -> None:
     local_ids = {item.id for item in dataset.items}
     remote = client.get_dataset(dataset.name)
     for item in remote.items:

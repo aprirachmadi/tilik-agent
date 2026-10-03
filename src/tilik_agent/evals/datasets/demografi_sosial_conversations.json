@@ -1,0 +1,43 @@
+{
+  "name": "demografi-sosial-conversations",
+  "version": "2026-10-02",
+  "items": [
+    {
+      "id": "c1",
+      "scenario": "User asks Jawa Barat's TPT for one period, then asks about another period by ellipsis, then asks for a comparison without naming the province again.",
+      "expected_outcome": "Agent reports Jawa Barat's TPT for August 2025 and February 2025 from the TPT-by-province table, keeps Jawa Barat across all turns, and states the difference and which month was higher.",
+      "user_turns": [
+        "Berapa TPT Jawa Barat pada Agustus 2025?",
+        "Kalau Februari?",
+        "Jadi naik atau turun, dan selisihnya berapa?"
+      ]
+    },
+    {
+      "id": "c2",
+      "scenario": "User asks for a top-3 list, then refers to those three provinces only as 'provinsi-provinsi itu' in a different table.",
+      "expected_outcome": "Agent finds the three provinces with the highest TPT in August 2025, then fetches APS age 16-18 for 2025 for exactly those three without asking the user to repeat them.",
+      "user_turns": [
+        "Provinsi mana saja yang punya tiga TPT tertinggi pada Agustus 2025?",
+        "Berapa Angka Partisipasi Sekolah umur 16-18 tahun di provinsi-provinsi itu pada 2025?"
+      ]
+    },
+    {
+      "id": "c3",
+      "scenario": "User asks about urban poverty, then corrects the area type mid-conversation.",
+      "expected_outcome": "Agent first reports the urban poverty rate change from March 2024 to March 2025, then after the correction reports the rural figures instead and does not reuse the urban numbers.",
+      "user_turns": [
+        "Bagaimana perubahan persentase penduduk miskin perkotaan Indonesia dari Maret 2024 ke Maret 2025?",
+        "Maaf, maksud saya perdesaan, bukan perkotaan."
+      ]
+    },
+    {
+      "id": "c4",
+      "scenario": "User asks a value for one province, then changes only the year.",
+      "expected_outcome": "Agent reports DKI Jakarta's population density for 2025, then for 2024 from the same table, and keeps DKI Jakarta in the second lookup.",
+      "user_turns": [
+        "Berapa kepadatan penduduk DKI Jakarta tahun 2025?",
+        "Kalau 2024?"
+      ]
+    }
+  ]
+}
