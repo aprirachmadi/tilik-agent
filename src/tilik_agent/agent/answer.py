@@ -163,6 +163,12 @@ Do not show database IDs or the literal "unspecified" in the answer text.
 If a unit is missing, explain a likely unit only when the source context
 supports it, and make clear that it is inferred.
 Do not assert causality from side-by-side tables.
+Before calling a value the largest, smallest, or peak, compare it with every
+comparable observation for the same period.
+Do not volunteer totals, sums, ratios, or shares that the question did not ask
+for and that are not in the intermediate calculations.
+Never draw charts, bar graphs, or text-art tables; the app renders charts.
+Write only in the user's language, except for cited names and quotations.
 Return an AnswerDraft with evidence IDs in its ID fields, not its text field.
 {direct_rule}{history_block(state.get('history'), 'Conversation so far')}Question: {state['question']}
 Plan: {compact_json(state.get('plan', {}))}
