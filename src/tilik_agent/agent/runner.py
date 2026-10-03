@@ -6,6 +6,7 @@ from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from tilik_agent.agent.answer import answer_blocks
 from tilik_agent.agent.graph import compile_graph
 from tilik_agent.agent.schemas import ChatTurn, State
 from tilik_agent.agent.tracing import current_callbacks, current_trace_id, question_trace
@@ -18,6 +19,7 @@ class QuestionResult:
 
     answer: str | None = None
     chart: dict[str, Any] | None = None
+    blocks: list[dict[str, str]] | None = None
     answer_observation_ids: list[int] = field(default_factory=list)
     answer_document_ids: list[str] = field(default_factory=list)
     step_status: dict[str, Any] = field(default_factory=dict)
@@ -138,9 +140,13 @@ def cited_sources(state: State) -> list[dict[str, Any]]:
 
 def question_result(state: State, *, trace_id: str | None = None) -> QuestionResult:
     """Copy the merged graph state into the object the API stores and returns."""
+    raw_answer = state.get("answer")
+    chart = state.get("chart")
+    answer, blocks = answer_blocks(raw_answer, chart) if raw_answer is not None else (None, None)
     return QuestionResult(
-        answer=state.get("answer"),
-        chart=state.get("chart"),
+        answer=answer,
+        chart=chart,
+        blocks=blocks,
         answer_observation_ids=state.get("answer_observation_ids") or [],
         answer_document_ids=state.get("answer_document_ids") or [],
         step_status=state.get("step_status") or {},

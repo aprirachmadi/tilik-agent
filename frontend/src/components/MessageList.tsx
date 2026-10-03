@@ -75,6 +75,9 @@ export function MessageList({ messages, status, busy, onRetry }: MessageListProp
           .find((item) => item.role === "user")?.content;
         const hasFailure = Boolean(message.planError || message.sqlError || message.retrievalError || message.chartError);
         const hasNotes = !message.pending && hasFailure;
+        const orderedBlocks = message.chart && message.blocks?.some((block) => block.type === "chart")
+          ? message.blocks
+          : null;
         const missingSources = !message.pending && message.sourceRoute !== "direct" &&
           (Boolean(message.content.trim()) || Boolean(message.chart)) && message.sources.length === 0;
         return (
@@ -88,14 +91,28 @@ export function MessageList({ messages, status, busy, onRetry }: MessageListProp
                 <p className="mt-1 text-sm text-ink-muted">Pencarian sumber dapat memerlukan beberapa saat. Anda dapat menghentikannya kapan saja.</p>
               </div>
             ) : (
-              message.content && (
+              (message.content || orderedBlocks) && (
                 <section aria-label="Jawaban">
                   <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1">
                     <h2 className="text-sm font-semibold text-ink-mid">Jawaban</h2>
                     {(hasFailure || missingSources) ? <span className="text-sm text-clay">Perlu verifikasi</span> : null}
                   </div>
-                  <div className="reading max-w-[65ch] text-[1.0625rem] text-ink">
-                    <Markdown components={markdown}>{answerWithoutDuplicateChart(message.content, message.chart)}</Markdown>
+                  <div className="space-y-7">
+                    {orderedBlocks ? orderedBlocks.map((block, blockIndex) => (
+                      block.type === "text" ? (
+                        <div key={blockIndex} className="reading max-w-[65ch] text-[1.0625rem] text-ink">
+                          <Markdown components={markdown}>{block.text}</Markdown>
+                        </div>
+                      ) : (
+                        <section key={blockIndex} aria-label="Visualisasi data">
+                          <ChartCard chart={message.chart!} />
+                        </section>
+                      )
+                    )) : (
+                      <div className="reading max-w-[65ch] text-[1.0625rem] text-ink">
+                        <Markdown components={markdown}>{answerWithoutDuplicateChart(message.content, message.chart)}</Markdown>
+                      </div>
+                    )}
                   </div>
                 </section>
               )
@@ -135,7 +152,7 @@ export function MessageList({ messages, status, busy, onRetry }: MessageListProp
                 ) : null}
               </section>
             ) : null}
-            {message.chart ? (
+            {message.chart && !orderedBlocks ? (
               <section aria-label="Visualisasi data">
                 <ChartCard chart={message.chart} />
               </section>

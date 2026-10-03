@@ -60,6 +60,7 @@ class QuestionResponse(BaseModel):
     conversation_id: str
     answer: str | None = None
     chart: dict[str, Any] | None = None
+    blocks: list[dict[str, str]] | None = None
     sources: list[dict[str, Any]] = Field(default_factory=list)
     source_route: str | None = None
     chart_error: str | None = None
@@ -84,6 +85,7 @@ class ConversationMessage(BaseModel):
     role: str
     content: str
     chart: dict[str, Any] | None = None
+    blocks: list[dict[str, str]] | None = None
     sources: list[dict[str, Any]] = Field(default_factory=list)
     source_route: str | None = None
     chart_error: str | None = None
@@ -136,6 +138,7 @@ def _response(conversation_id: str, result: QuestionResult) -> QuestionResponse:
         conversation_id=conversation_id,
         answer=result.answer,
         chart=result.chart,
+        blocks=result.blocks,
         sources=result.sources,
         source_route=result.source_route,
         chart_error=result.chart_error,
@@ -160,6 +163,7 @@ def _save_turn(conversation_id: str, question: str, result: QuestionResult) -> Q
             standalone_question=result.standalone_question,
             trace_id=result.trace_id,
             chart=result.chart,
+            blocks=result.blocks,
             sources=result.sources,
             source_route=result.source_route,
             chart_error=result.chart_error,
@@ -199,6 +203,7 @@ def _message_response(session: Session, row: Message) -> ConversationMessage:
         role=row.role,
         content=row.content,
         chart=row.chart,
+        blocks=row.blocks,
         sources=_with_tablesource(session, list(row.sources or [])),
         source_route=row.source_route,
         chart_error=row.chart_error,

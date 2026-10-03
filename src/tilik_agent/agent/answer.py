@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from decimal import Decimal
 from typing import Any, Literal
 
@@ -18,6 +19,40 @@ from tilik_agent.agent.runtime import (
     observation_index,
 )
 from tilik_agent.agent.schemas import Analysis, AnswerDraft, Calculation, ChartSpec, State
+
+_CHART_MARKER = re.compile(r"(?m)^[ \t]*\[\[chart\]\][ \t]*$")
+
+
+def _clean_chart_markers(text: str) -> str:
+    if "[[chart]]" not in text:
+        return text
+    return re.sub(r"\n{3,}", "\n\n", text.replace("\r\n", "\n").replace("[[chart]]", "")).strip()
+
+
+def answer_blocks(text: str, chart: dict[str, Any] | None) -> tuple[str, list[dict[str, str]] | None]:
+    """Remove placement markers and place the validated chart among text blocks."""
+    if "[[chart]]" in text:
+        text = text.replace("\r\n", "\n")
+    marker = _CHART_MARKER.search(text)
+    answer = _clean_chart_markers(text)
+    if chart is None:
+        return answer, None
+
+    if marker:
+        before = _clean_chart_markers(text[: marker.start()]).strip()
+        after = _clean_chart_markers(text[marker.end() :]).strip()
+    else:
+        paragraph_end = re.search(r"\r?\n\s*\r?\n", answer)
+        before = answer[: paragraph_end.start()].strip() if paragraph_end else answer.strip()
+        after = answer[paragraph_end.end() :].strip() if paragraph_end else ""
+
+    blocks = []
+    if before:
+        blocks.append({"type": "text", "text": before})
+    blocks.append({"type": "chart"})
+    if after:
+        blocks.append({"type": "text", "text": after})
+    return answer, blocks
 
 
 def _answer_observation_rows(state: State) -> list[dict[str, Any]]:
@@ -97,7 +132,7 @@ Return a ChartSpec, not plotting code. Every point's value must match its
 observation_id. Prefer bars for category comparisons and lines for trends.
 Keep distinct units in distinct series; if units cannot be compared on one
 axis, chart only one metric. Question: {state['question']}
-Answer: {state['answer']}
+Answer: {_clean_chart_markers(state['answer'])}
 Rows: {compact_json(evidence_rows(rows))}"""
     try:
         chart = model_json(ChartSpec, prompt)
@@ -168,6 +203,10 @@ comparable observation for the same period.
 Do not volunteer totals, sums, ratios, or shares that the question did not ask
 for and that are not in the intermediate calculations.
 Never draw charts, bar graphs, or text-art tables; the app renders charts.
+For a chart request, write a brief introduction, put [[chart]] alone on a
+line, then explain the key finding. If a chart would help an answer that did
+not request one, put the marker where it belongs. The marker requests
+placement; do not claim a chart exists until one is built.
 Write only in the user's language, except for cited names and quotations.
 Return an AnswerDraft with evidence IDs in its ID fields, not its text field.
 {direct_rule}{history_block(state.get('history'), 'Conversation so far')}Question: {state['question']}

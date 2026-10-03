@@ -34,6 +34,7 @@ class Message(Base):
     standalone_question: Mapped[str | None] = mapped_column(Text, nullable=True)
     trace_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     chart: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    blocks: Mapped[list[dict[str, str]] | None] = mapped_column(JSON, nullable=True)
     sources: Mapped[list[Any] | None] = mapped_column(JSON, nullable=True)
     source_route: Mapped[str | None] = mapped_column(String(16), nullable=True)
     chart_error: Mapped[str | None] = mapped_column(Text, nullable=True)

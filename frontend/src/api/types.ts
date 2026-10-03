@@ -14,6 +14,8 @@ export type ChartSpec = {
   data: ChartPoint[];
 };
 
+export type AnswerBlock = { type: "text"; text: string } | { type: "chart" };
+
 export type DatasetSource = {
   kind: "dataset";
   dataset_id?: number;
@@ -33,6 +35,7 @@ export type QuestionResponse = {
   conversation_id: string;
   answer: string | null;
   chart: ChartSpec | null;
+  blocks: AnswerBlock[] | null;
   sources: SourceChip[];
   source_route: string | null;
   chart_error: string | null;
@@ -54,6 +57,7 @@ export type ConversationMessage = {
   role: string;
   content: string;
   chart: ChartSpec | null;
+  blocks: AnswerBlock[] | null;
   sources: SourceChip[];
   source_route: string | null;
   chart_error: string | null;
@@ -69,6 +73,7 @@ export type ThreadMessage = {
   role: "user" | "assistant";
   content: string;
   chart: ChartSpec | null;
+  blocks: AnswerBlock[] | null;
   sources: SourceChip[];
   sourceRoute: string | null;
   chartError: string | null;
@@ -98,6 +103,7 @@ export function messageFromHistory(message: ConversationMessage): ThreadMessage 
     role: message.role,
     content: message.content,
     chart: asChart(message.chart),
+    blocks: message.blocks ?? null,
     sources: message.sources ?? [],
     sourceRoute: message.source_route,
     chartError: message.chart_error,
@@ -115,6 +121,7 @@ export function messageFromResult(result: QuestionResponse): ThreadMessage {
     role: "assistant",
     content: result.answer ?? "",
     chart: asChart(result.chart),
+    blocks: result.blocks ?? null,
     sources: result.sources ?? [],
     sourceRoute: result.source_route,
     chartError: result.chart_error,

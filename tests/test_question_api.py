@@ -13,6 +13,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
+from tilik_agent.agent.answer import answer_blocks
 from tilik_agent.agent.runner import cited_sources, question_result, run_question, stream_question
 from tilik_agent.agent.schemas import State
 from tilik_agent.api import app, status_lines
@@ -99,6 +100,51 @@ _CHART = {
     "y_axis": "Persen",
     "data": [{"label": "Papua", "series": "TPT", "value": 6.96, "unit": "persen", "observation_id": 1}],
 }
+
+
+@pytest.mark.parametrize(
+    ("text", "chart", "expected_answer", "expected_blocks"),
+    [
+        (
+            "Intro.\n\n[[chart]]\n\nInterpretation.",
+            _CHART,
+            "Intro.\n\nInterpretation.",
+            [{"type": "text", "text": "Intro."}, {"type": "chart"}, {"type": "text", "text": "Interpretation."}],
+        ),
+        (
+            "Intro.\r\n\r\n[[chart]]\r\n\r\nInterpretation.",
+            _CHART,
+            "Intro.\n\nInterpretation.",
+            [{"type": "text", "text": "Intro."}, {"type": "chart"}, {"type": "text", "text": "Interpretation."}],
+        ),
+        (
+            "Intro.\n\nInterpretation.",
+            _CHART,
+            "Intro.\n\nInterpretation.",
+            [{"type": "text", "text": "Intro."}, {"type": "chart"}, {"type": "text", "text": "Interpretation."}],
+        ),
+        (
+            "Intro.\n\n[[chart]]\n\nInterpretation.\n\n[[chart]]",
+            _CHART,
+            "Intro.\n\nInterpretation.",
+            [{"type": "text", "text": "Intro."}, {"type": "chart"}, {"type": "text", "text": "Interpretation."}],
+        ),
+        ("Intro.\n\n[[chart]]\n\nInterpretation.", None, "Intro.\n\nInterpretation.", None),
+    ],
+)
+def test_answer_blocks(
+    text: str,
+    chart: dict[str, Any] | None,
+    expected_answer: str,
+    expected_blocks: list[dict[str, str]] | None,
+) -> None:
+    assert answer_blocks(text, chart) == (expected_answer, expected_blocks)
+
+
+class _PlacedChartGraph:
+    def stream(self, state: dict[str, Any], config: dict[str, Any], stream_mode: list[str]) -> Iterator[dict[str, Any]]:
+        yield {"write_answer": {"answer": "Intro.\n\n[[chart]]\n\nInterpretation."}}
+        yield {"build_chart": {"chart": _CHART}}
 
 
 class _WorkspaceGraph:
@@ -269,6 +315,7 @@ def test_questions_persists_chart_sources_and_lists_the_thread(
     assert created.status_code == 200
     body = created.json()
     assert body["chart"] == _CHART
+    assert body["blocks"] == [{"type": "text", "text": "Papua 6,96"}, {"type": "chart"}]
     assert body["source_route"] == "both"
     assert body["chart_error"] is None
     assert body["sources"] == [
@@ -296,6 +343,7 @@ def test_questions_persists_chart_sources_and_lists_the_thread(
     messages = detail.json()["messages"]
     assert [message["role"] for message in messages] == ["user", "assistant"]
     assert messages[1]["chart"] == _CHART
+    assert messages[1]["blocks"] == body["blocks"]
     assert messages[1]["sources"] == body["sources"]
     assert messages[1]["source_route"] == "both"
     assert "trace_id" not in messages[1]
@@ -317,6 +365,39 @@ def test_questions_persists_chart_sources_and_lists_the_thread(
     assert reloaded["updated_at"] >= first_updated
     missing = client.get("/conversations/missing")
     assert missing.status_code == 404
+
+
+@pytest.mark.parametrize("path", ["/questions", "/questions/stream"])
+def test_placed_chart_round_trips(
+    path: str, monkeypatch: pytest.MonkeyPatch, chat_db: Session
+) -> None:
+    monkeypatch.setattr("tilik_agent.agent.runner.compile_graph", lambda: _PlacedChartGraph())
+    response = TestClient(app).post(path, json={"question": "grafik"})
+    assert response.status_code == 200
+    body = response.json() if path == "/questions" else next(
+        payload for event, payload in _events(response.text) if event == "result"
+    )
+    assert body["answer"] == "Intro.\n\nInterpretation."
+    assert body["blocks"] == [
+        {"type": "text", "text": "Intro."},
+        {"type": "chart"},
+        {"type": "text", "text": "Interpretation."},
+    ]
+    detail = TestClient(app).get(f"/conversations/{body['conversation_id']}").json()
+    saved = detail["messages"][1]
+    assert saved["content"] == body["answer"]
+    assert saved["blocks"] == body["blocks"]
+    assert saved["chart"] == body["chart"] == _CHART
+
+
+def test_old_message_has_no_blocks(chat_db: Session) -> None:
+    chat_db.add(Conversation(id="old-thread"))
+    chat_db.add(Message(conversation_id="old-thread", role="assistant", content="Old answer", chart=_CHART))
+    chat_db.commit()
+
+    detail = TestClient(app).get("/conversations/old-thread")
+    assert detail.status_code == 200
+    assert detail.json()["messages"][0]["blocks"] is None
 
 
 class _SourceWithoutTablesourceGraph:
