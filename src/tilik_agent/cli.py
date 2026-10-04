@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import structlog
@@ -100,11 +101,18 @@ def _load(*, table_id: str | None) -> IngestReport:
 @app.command("benchmark")
 def benchmark(
     conversations: bool = typer.Option(False, "--conversations", help="Score scripted multi-turn conversations"),
+    n_samples: int | None = typer.Option(None, "--n-samples", min=1, help="Run this many dataset items"),
+    seed: int = typer.Option(42, "--seed", help="Reproducible sample seed"),
 ) -> None:
     """Score the question file or scripted conversations with the enabled judges."""
     from tilik_agent.evals.runner import run_benchmark, run_conversation_benchmark
 
-    typer.echo(run_conversation_benchmark() if conversations else run_benchmark())
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="backslashreplace")
+    typer.echo(
+        run_conversation_benchmark(n_samples=n_samples, seed=seed)
+        if conversations else run_benchmark(n_samples=n_samples, seed=seed)
+    )
 
 
 @app.command("serve")

@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 
 from tilik_agent.agent.runtime import llm_text, model_json
-from tilik_agent.agent.schemas import PlanStep
+from tilik_agent.agent.schemas import Analysis, PlanStep
 from tilik_agent.agent.sql import _sql_step_once
 from tilik_agent.agent.tracing import (
     TraceBinding,
@@ -48,6 +48,43 @@ class _SqlRecorder:
     def stream(self, state: dict[str, Any], config: dict[str, Any], stream_mode: str) -> Any:
         self.config = config
         yield {"agent": {"messages": []}}
+
+
+def test_model_json_retries_missing_tool_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    expected = Analysis()
+
+    class _Structured:
+        calls = 0
+
+        def invoke(self, messages: list[Any], **kwargs: Any) -> Analysis | None:
+            self.calls += 1
+            return None if self.calls == 1 else expected
+
+    structured = _Structured()
+
+    class _Chat:
+        def with_structured_output(self, schema: type[Any], method: str) -> _Structured:
+            assert schema is Analysis
+            assert method == "function_calling"
+            return structured
+
+    monkeypatch.setattr("tilik_agent.agent.runtime.get_llm", lambda: _Chat())
+    assert model_json(Analysis, "test") is expected
+    assert structured.calls == 2
+
+
+def test_model_json_reports_repeated_missing_tool_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _Structured:
+        def invoke(self, messages: list[Any], **kwargs: Any) -> None:
+            return None
+
+    class _Chat:
+        def with_structured_output(self, schema: type[Any], method: str) -> _Structured:
+            return _Structured()
+
+    monkeypatch.setattr("tilik_agent.agent.runtime.get_llm", lambda: _Chat())
+    with pytest.raises(ValueError, match="Model returned no Analysis tool call"):
+        model_json(Analysis, "test")
 
 
 def test_worker_gets_its_own_langfuse_handler(monkeypatch: pytest.MonkeyPatch) -> None:

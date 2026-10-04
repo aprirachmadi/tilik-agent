@@ -6,7 +6,8 @@ normal question call. ``score_question`` scores a single question.
 
 from __future__ import annotations
 
-from typing import Any
+import random
+from typing import Any, TypeVar
 from uuid import uuid4
 
 from deepeval.integrations.langchain import CallbackHandler
@@ -21,6 +22,7 @@ from tilik_agent.agent.tracing import langfuse_configured
 from tilik_agent.config import get_agent_config
 from tilik_agent.evals.dataset import (
     BenchmarkDataset,
+    BenchmarkItem,
     ConversationDataset,
     ConversationItem,
     load_benchmark,
@@ -32,34 +34,47 @@ from tilik_agent.evals.metrics import argument_correctness_metric, conversation_
 from tilik_agent.evals.scores import ItemScore, assemble_scores, format_report, pipeline_status_label
 
 _TOOL_DESCRIPTIONS = {tool.name: tool.description for tool in SQL_TOOLS}
+_Item = TypeVar("_Item")
 
 
-def run_benchmark() -> str:
+def _sample_items(items: list[_Item], n_samples: int | None, seed: int) -> list[_Item]:
+    """Choose a stable subset while preserving the dataset's display order."""
+    if n_samples is not None and n_samples < 1:
+        raise ValueError("n_samples must be at least 1")
+    if n_samples is None or n_samples >= len(items):
+        return items
+    positions = set(random.Random(seed).sample(range(len(items)), n_samples))
+    return [item for index, item in enumerate(items) if index in positions]
+
+
+def run_benchmark(*, n_samples: int | None = None, seed: int = 42) -> str:
     """Score every question in the JSON file and upload the run when Langfuse is configured."""
     dataset = load_benchmark()
+    selected = _sample_items(dataset.items, n_samples, seed)
     judge = build_judge()
     if not langfuse_configured():
-        _progress(f"Scoring {len(dataset.items)} questions")
+        _progress(f"Scoring {len(selected)}/{len(dataset.items)} questions")
         rows = []
-        for item in dataset.items:
+        for item in selected:
             _, scores = _score_item(item.id, item.question, judge)
             rows.append((item.id, scores))
         return format_report(rows) + "\n\nLangfuse upload skipped"
-    return _run_published(dataset, judge)
+    return _run_published(dataset, judge, selected=selected, seed=seed)
 
 
-def run_conversation_benchmark() -> str:
+def run_conversation_benchmark(*, n_samples: int | None = None, seed: int = 42) -> str:
     """Replay scripted conversations and score each complete transcript once."""
     dataset = load_conversations()
+    selected = _sample_items(dataset.items, n_samples, seed)
     judge = build_conversation_judge()
     if not langfuse_configured():
-        _progress(f"Scoring {len(dataset.items)} conversations")
+        _progress(f"Scoring {len(selected)}/{len(dataset.items)} conversations")
         rows = []
-        for item in dataset.items:
+        for item in selected:
             _, scores = _score_conversation_item(item, judge)
             rows.append((item.id, scores))
         return format_report(rows) + "\n\nLangfuse upload skipped"
-    return _run_conversations_published(dataset, judge)
+    return _run_conversations_published(dataset, judge, selected=selected, seed=seed)
 
 
 def _score_item(
@@ -106,7 +121,8 @@ def score_conversation(
         answer = result.answer or ""
         _progress(f"  answer:\n{answer}")
         turns.extend((Turn(role="user", content=question), Turn(
-            role="assistant", content=answer, tools_called=_tools_called(handler)
+            role="assistant", content=answer,
+            tools_called=_tools_called(handler),
         )))
         history.extend(({"role": "user", "content": question}, {"role": "assistant", "content": answer}))
         statuses.append(pipeline_status_label(result.step_status, result.plan_error))
@@ -121,6 +137,7 @@ def score_conversation(
             config.evals.conversation_metrics, judge,
             history_messages=config.conversation.max_history_messages,
         ).items():
+            _progress(f"  judging {name}")
             metric.measure(case)
             scores.append(ItemScore(name, float(metric.score), metric.reason or "", "NUMERIC"))
     if config.evals.conversation_metrics.pipeline_status.enabled:
@@ -244,19 +261,29 @@ def _prune(span: dict[str, Any], nodes: set[str]) -> list[dict[str, Any]]:
     return [node]
 
 
-def _run_published(dataset: BenchmarkDataset, judge: AgentJudgeLlm | None) -> str:
+def _run_published(
+    dataset: BenchmarkDataset, judge: AgentJudgeLlm | None,
+    *, selected: list[BenchmarkItem] | None = None, seed: int = 42,
+) -> str:
     from langfuse import get_client
 
     _progress("Connecting to Langfuse")
     client = get_client()
     _progress("Syncing the question file")
     remote_items = sync_benchmark(client, dataset)
-    _progress(f"Scoring {len(dataset.items)} questions")
+    selected = selected if selected is not None else dataset.items
+    selected_ids = {item.id for item in selected}
+    _progress(f"Scoring {len(selected)}/{len(dataset.items)} questions")
     captured: dict[str, list[ItemScore]] = {}
+    errors: dict[str, str] = {}
 
     def task(*, item: Any, **kwargs: Any) -> str:
         question = item.input if isinstance(item.input, str) else str(item.input)
-        result, scores = _score_item(item.id, question, judge)
+        try:
+            result, scores = _score_item(item.id, question, judge)
+        except Exception as exc:
+            errors[item.id] = str(exc)
+            raise
         captured[item.id] = scores
         captured[question] = scores
         return result.answer or ""
@@ -266,32 +293,43 @@ def _run_published(dataset: BenchmarkDataset, judge: AgentJudgeLlm | None) -> st
         name=dataset.name,
         run_name=f"{dataset.name} {dataset.version}",
         description="Referenceless benchmark of the BPS question agent",
-        data=remote_items,
+        data=[item for item in remote_items if item.id in selected_ids],
         task=task,
         evaluators=evaluators,
         max_concurrency=1,
-        metadata={"version": dataset.version},
+        metadata={"version": dataset.version, "n_samples": str(len(selected)), "seed": str(seed)},
     )
-    rows = [(item.id, captured[item.id]) for item in dataset.items]
+    _check_scored(selected_ids, captured, errors)
+    rows = [(item.id, captured[item.id]) for item in selected]
     report = format_report(rows)
     url = experiment.dataset_run_url or ""
     return f"{report}\n\n{url}" if url else report
 
 
-def _run_conversations_published(dataset: ConversationDataset, judge: AgentJudgeLlm | None) -> str:
+def _run_conversations_published(
+    dataset: ConversationDataset, judge: AgentJudgeLlm | None,
+    *, selected: list[ConversationItem] | None = None, seed: int = 42,
+) -> str:
     from langfuse import get_client
 
     _progress("Connecting to Langfuse")
     client = get_client()
     _progress("Syncing the conversation file")
     remote_items = sync_conversations(client, dataset)
-    _progress(f"Scoring {len(dataset.items)} conversations")
+    selected = selected if selected is not None else dataset.items
+    selected_ids = {item.id for item in selected}
+    _progress(f"Scoring {len(selected)}/{len(dataset.items)} conversations")
     captured: dict[str, list[ItemScore]] = {}
+    errors: dict[str, str] = {}
     by_id = {item.id: item for item in dataset.items}
 
     def task(*, item: Any, **kwargs: Any) -> dict[str, Any]:
         local = by_id[item.id]
-        case, scores = _score_conversation_item(local, judge)
+        try:
+            case, scores = _score_conversation_item(local, judge)
+        except Exception as exc:
+            errors[item.id] = str(exc)
+            raise
         captured[item.id] = scores
         captured[str(item.input)] = scores
         return {"turns": [{"role": turn.role, "content": turn.content} for turn in case.turns]}
@@ -301,15 +339,23 @@ def _run_conversations_published(dataset: ConversationDataset, judge: AgentJudge
         name=dataset.name,
         run_name=f"{dataset.name} {dataset.version}",
         description="Referenceless multi-turn benchmark of the BPS question agent",
-        data=remote_items,
+        data=[item for item in remote_items if item.id in selected_ids],
         task=task,
         evaluators=evaluators,
         max_concurrency=1,
-        metadata={"version": dataset.version},
+        metadata={"version": dataset.version, "n_samples": str(len(selected)), "seed": str(seed)},
     )
-    report = format_report([(item.id, captured[item.id]) for item in dataset.items])
+    _check_scored(selected_ids, captured, errors)
+    report = format_report([(item.id, captured[item.id]) for item in selected])
     url = experiment.dataset_run_url or ""
     return f"{report}\n\n{url}" if url else report
+
+
+def _check_scored(ids: set[str], captured: dict[str, list[ItemScore]], errors: dict[str, str]) -> None:
+    missing = ids - captured.keys()
+    if missing:
+        details = "; ".join(f"{item_id}: {errors.get(item_id, 'no scores recorded')}" for item_id in sorted(missing))
+        raise RuntimeError(f"Benchmark items failed before scoring: {details}")
 
 
 def _enabled_names() -> list[str]:

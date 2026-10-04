@@ -1,10 +1,9 @@
 llm:
-  model: qwen3.8-flash
-  base_url: https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1
+  model: orvix/deepseek-v4.1-flash
+  base_url: https://api.orvix.id/v1
   temperature: 0
   api_key_env: OPENAI_API_KEY
-  extra_body:
-    enable_thinking: false
+  extra_body: {}
 
 embedding:
   model: sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
@@ -34,12 +33,11 @@ conversation:
 
 evals:
   judge:
-    model: qwen3.8-flash
-    base_url: https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1
+    model: orvix/deepseek-v4.1-flash
+    base_url: https://api.orvix.id/v1
     temperature: 0
     api_key_env: OPENAI_API_KEY
-    extra_body:
-      enable_thinking: false
+    extra_body: {}
   metrics:
     task_completion:
       enabled: true

@@ -13,7 +13,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.tools import tool
 from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.prebuilt import ToolNode
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from tilik_agent.agent.runner import QuestionResult
 from tilik_agent.config import (
@@ -28,9 +28,12 @@ from tilik_agent.evals.judge import AgentJudgeLlm
 from tilik_agent.evals.langfuse_dataset import sync_benchmark, sync_conversations
 from tilik_agent.evals.metrics import argument_correctness_metric, conversation_metrics, task_completion_metric
 from tilik_agent.evals.runner import (
+    _check_scored,
     _enabled_conversation_names,
     _prune,
     _run_conversations_published,
+    _run_published,
+    _sample_items,
     score_conversation,
     score_question,
 )
@@ -40,7 +43,7 @@ from tilik_agent.evals.scores import ItemScore, assemble_scores, pipeline_status
 @tool
 def search_datasets(query: str) -> str:
     """Search the dataset catalog."""
-    return '{"datasets": [{"id": 7}]}'
+    return '{"datasets": [{"id": 7, "title": "Kepadatan Penduduk menurut Provinsi"}]}'
 
 
 class _CapturingMetric:
@@ -232,6 +235,27 @@ def test_agent_judge_llm_reads_the_evals_block(monkeypatch: pytest.MonkeyPatch) 
     assert judge.get_model_name() == "judge-model"
 
 
+def test_agent_judge_uses_strict_structured_output(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("JUDGE_TEST_KEY", "test-key")
+    judge = AgentJudgeLlm(LlmConfig(
+        model="judge-model", base_url="https://example.test/v1", temperature=0,
+        api_key_env="JUDGE_TEST_KEY", extra_body={},
+    ))
+    options: dict[str, Any] = {}
+
+    class _Reason(BaseModel):
+        reason: str
+
+    class _Chat:
+        def with_structured_output(self, schema: type[BaseModel], *, strict: bool) -> SimpleNamespace:
+            options.update({"schema": schema, "strict": strict})
+            return SimpleNamespace(invoke=lambda prompt: _Reason(reason=prompt))
+
+    judge.model = _Chat()
+    assert judge.generate("ok", _Reason).reason == "ok"
+    assert options == {"schema": _Reason, "strict": True}
+
+
 def test_sync_upserts_question_ids_and_archives_removals() -> None:
     """
     Condition:
@@ -404,6 +428,10 @@ def test_conversation_replays_generated_history_and_scores_once(monkeypatch: pyt
     ]
     assert all(turn.tools_called[0].name == "search_datasets" for turn in case.turns[1::2])
     assert all(turn.tools_called[0].description for turn in case.turns[1::2])
+    assert all(
+        "Kepadatan Penduduk menurut Provinsi" in str(turn.tools_called[0].output)
+        for turn in case.turns[1::2]
+    )
     assert {name: len(cases) for name, cases in measured.items()} == {
         "goal_accuracy": 1, "tool_use": 1, "conversation_completeness": 1
     }
@@ -453,9 +481,10 @@ def test_sync_conversation_dataset_stores_script_and_human_context() -> None:
 
 def test_published_conversation_run_outputs_generated_transcript(monkeypatch: pytest.MonkeyPatch) -> None:
     dataset = load_conversations()
-    dataset.items = dataset.items[1:2]  # The two-turn case.
+    selected = dataset.items[1:2]  # The two-turn case.
     seen_outputs: list[dict[str, Any]] = []
     sessions: list[str | None] = []
+    synced_ids: list[str] = []
 
     def agent(question: str, *, history: list[dict[str, str]], conversation_id: str,
               callbacks: Sequence[Any]) -> QuestionResult:
@@ -467,9 +496,12 @@ def test_published_conversation_run_outputs_generated_transcript(monkeypatch: py
             return SimpleNamespace(items=[])
 
         def create_dataset_item(self, **kwargs: Any) -> SimpleNamespace:
+            synced_ids.append(kwargs["id"])
             return SimpleNamespace(id=kwargs["id"], input=kwargs["input"], metadata=kwargs["metadata"])
 
         def run_experiment(self, **kwargs: Any) -> SimpleNamespace:
+            assert len(kwargs["data"]) == 1
+            assert kwargs["metadata"]["n_samples"] == "1"
             for item in kwargs["data"]:
                 output = kwargs["task"](item=item)
                 seen_outputs.append(output)
@@ -481,10 +513,58 @@ def test_published_conversation_run_outputs_generated_transcript(monkeypatch: py
     monkeypatch.setattr("tilik_agent.evals.runner.run_question", agent)
     monkeypatch.setattr("tilik_agent.evals.runner._enabled_conversation_names", lambda: ["pipeline_status"])
     monkeypatch.setattr("langfuse.get_client", lambda: _Client())
-    report = _run_conversations_published(dataset, None)
+    report = _run_conversations_published(dataset, None, selected=selected)
+    assert synced_ids == [item.id for item in dataset.items]
     assert report.count("pipeline_status:") == 1
     assert "https://langfuse.test/run" in report
     assert sessions[0] == sessions[1]
     assert [turn["content"] for turn in seen_outputs[0]["turns"]] == [
-        dataset.items[0].user_turns[0], "answer 1", dataset.items[0].user_turns[1], "answer 2"
+        selected[0].user_turns[0], "answer 1", selected[0].user_turns[1], "answer 2"
     ]
+
+
+def test_sample_count_is_reproducible_and_full_dataset_is_default() -> None:
+    items = list(range(12))
+    assert _sample_items(items, None, 42) == items
+    assert _sample_items(items, 20, 42) == items
+    assert _sample_items(items, 3, 42) == _sample_items(items, 3, 42)
+    assert len(_sample_items(items, 3, 42)) == 3
+    assert _sample_items(items, 3, 42) != _sample_items(items, 3, 7)
+    with pytest.raises(ValueError, match="at least 1"):
+        _sample_items(items, 0, 42)
+
+
+def test_failed_experiment_item_reports_original_error() -> None:
+    with pytest.raises(RuntimeError, match="c1: Connection error"):
+        _check_scored({"c1"}, {}, {"c1": "Connection error"})
+
+
+def test_published_question_sample_keeps_full_langfuse_dataset(monkeypatch: pytest.MonkeyPatch) -> None:
+    dataset = load_benchmark()
+    selected = dataset.items[:1]
+    synced_ids: list[str] = []
+
+    class _Client:
+        def get_dataset(self, name: str) -> SimpleNamespace:
+            return SimpleNamespace(items=[])
+
+        def create_dataset_item(self, **kwargs: Any) -> SimpleNamespace:
+            synced_ids.append(kwargs["id"])
+            return SimpleNamespace(id=kwargs["id"], input=kwargs["input"], metadata=kwargs["metadata"])
+
+        def run_experiment(self, **kwargs: Any) -> SimpleNamespace:
+            assert len(kwargs["data"]) == 1
+            item = kwargs["data"][0]
+            output = kwargs["task"](item=item)
+            score = kwargs["evaluators"][0](input=item.input, output=output, metadata=item.metadata)
+            assert score.name == "pipeline_status"
+            return SimpleNamespace(dataset_run_url="")
+
+    monkeypatch.setattr("langfuse.get_client", lambda: _Client())
+    monkeypatch.setattr("tilik_agent.evals.runner._enabled_names", lambda: ["pipeline_status"])
+    monkeypatch.setattr("tilik_agent.evals.runner._score_item", lambda *args: (
+        QuestionResult(answer="stub answer"), [ItemScore("pipeline_status", "succeeded", "", "CATEGORICAL")]
+    ))
+    report = _run_published(dataset, None, selected=selected)
+    assert synced_ids == [item.id for item in dataset.items]
+    assert report.count("pipeline_status:") == 1

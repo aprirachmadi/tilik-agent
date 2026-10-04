@@ -216,6 +216,12 @@ When both Langfuse keys are set, the command upserts that JSON file into a Langf
 
 `poetry run tilik benchmark --conversations` replays the scripted user turns in `src/tilik_agent/evals/datasets/demografi_sosial_conversations.json`. Each new turn receives the earlier generated replies as history, and the run reports one score row per conversation. `evals.conversation_metrics` enables goal accuracy, tool use, conversation completeness, and pipeline status by default. Turn relevancy is available but off by default. The judge scores are referenceless; `expected_outcome` is kept for human review and is not a scored reference answer. When Langfuse is configured, each conversation uses one trace session and its transcript is stored as the experiment output.
 
+Conversation judges receive the recorded tool names, arguments, descriptions, and full outputs. The judge therefore has the same tool-result context as the trace. A provider may reject an item if its judge prompt exceeds that provider's limits.
+
+Use `--n-samples 3` with either benchmark mode to run three items, and `--seed 42` to repeat the same selection. Without `--n-samples`, every item runs. A sampled run still syncs the full dataset to Langfuse, so unsampled items stay available; only the selected items consume model calls and appear in that experiment.
+
+Sampling reduces the number of conversations or questions, but each item can still exceed the provider's per-request or per-minute token limits.
+
 ## Ingest
 
 Ingest writes through `database_url`, built from `POSTGRES_USER`, `POSTGRES_PASSWORD`, and the host settings in `.env`. That role is separate from the read-only `sql_agent` role used by questions.

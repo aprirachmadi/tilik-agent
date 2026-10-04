@@ -32,7 +32,7 @@ class AgentJudgeLlm(DeepEvalBaseLLM):
     def generate(self, prompt: str, schema: type[BaseModel] | None = None) -> Any:
         chat: ChatOpenAI = self.model
         if schema is not None:
-            return chat.with_structured_output(schema).invoke(prompt)
+            return chat.with_structured_output(schema, strict=True).invoke(prompt)
         content = chat.invoke(prompt).content
         return content if isinstance(content, str) else "".join(str(item) for item in content)
 

@@ -83,7 +83,11 @@ def _invoke_kwargs() -> dict[str, Any]:
 def model_json(schema: type[SchemaT], prompt: str) -> SchemaT:
     """Use tool-call structured output, as supported by the source SQL agent's LLM."""
     structured = get_llm().with_structured_output(schema, method="function_calling")
-    return structured.invoke([HumanMessage(content=prompt)], **_invoke_kwargs())
+    for _ in range(2):
+        result = structured.invoke([HumanMessage(content=prompt)], **_invoke_kwargs())
+        if result is not None:
+            return result
+    raise ValueError(f"Model returned no {schema.__name__} tool call")
 
 
 def llm_text(prompt: str) -> str:
