@@ -171,7 +171,8 @@ def _execute_plan(state: State) -> dict[str, Any]:
                 result.get("sql_error") if not evidence_count else ""
             )
             warning = result.get("sql_warnings") or ""
-            if evidence_count and not blocking:
+            incomplete_rows = any(row.get("truncated_batch") for row in result.get("observations", []))
+            if evidence_count and not blocking and not incomplete_rows:
                 status = "succeeded"
             elif evidence_count:
                 status = "partial"

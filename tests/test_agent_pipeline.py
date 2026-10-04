@@ -368,6 +368,18 @@ def test_execute_plan_marks_a_lookup_succeeded(monkeypatch: pytest.MonkeyPatch) 
     assert result["sql_warnings"] == "truncated"
 
 
+def test_execute_plan_marks_truncated_rows_partial(monkeypatch: pytest.MonkeyPatch) -> None:
+    def sql_step(step: Any, question: str, dependency: str = "") -> dict[str, Any]:
+        return {
+            "observations": [_observation(1, 6.96) | {"step_id": step.id, "truncated_batch": True}],
+            "sql_warnings": "get_observations returned a truncated result",
+        }
+
+    monkeypatch.setattr("tilik_agent.agent.workers._sql_step", sql_step)
+    result = _execute_plan({"question": "berapa TPT", "plan": _plan("sql_lookup")})
+    assert result["step_status"]["s1"]["status"] == "partial"
+
+
 def test_execute_plan_marks_an_empty_lookup_failed(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     Condition:
@@ -577,6 +589,21 @@ def test_write_answer_rejects_an_unknown_evidence_id(monkeypatch: pytest.MonkeyP
     assert result["answer_observation_ids"] == []
     assert result["answer_document_ids"] == []
     assert "unknown evidence" in result["answer"]
+
+
+def test_write_answer_explains_truncated_evidence_after_model_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail(schema: Any, prompt: str) -> Any:
+        raise ValueError("Model returned no AnswerDraft tool call")
+
+    monkeypatch.setattr("tilik_agent.agent.answer.model_json", fail)
+    result = write_answer(
+        {
+            "question": "Apakah kesenjangan menyempit?",
+            "observations": [_observation(1, 6.96) | {"truncated_batch": True}],
+        }
+    )
+    assert "truncated" in result["answer"]
+    assert result["answer_observation_ids"] == []
 
 
 def test_tool_payload_reads_json_and_reports_unreadable_text() -> None:

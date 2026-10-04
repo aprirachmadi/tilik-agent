@@ -4,6 +4,7 @@ llm:
   temperature: 0
   api_key_env: OPENAI_API_KEY
   extra_body: {}
+  max_tokens: 8192
 
 embedding:
   model: sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
@@ -38,6 +39,7 @@ evals:
     temperature: 0
     api_key_env: OPENAI_API_KEY
     extra_body: {}
+    max_tokens: 8192
   metrics:
     task_completion:
       enabled: true

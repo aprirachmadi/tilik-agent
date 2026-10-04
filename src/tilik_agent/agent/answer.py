@@ -232,8 +232,15 @@ def write_answer(state: State) -> dict[str, Any]:
             "answer_document_ids": answer.document_ids,
         }
     except (ValidationError, ValueError, APIError) as exc:
+        truncated = any(row.get("truncated_batch") for row in state.get("observations", []))
+        no_draft = isinstance(exc, ValueError) and str(exc) == "Model returned no AnswerDraft tool call"
+        message = (
+            "Could not produce a verified answer: at least one observation result was truncated."
+            if truncated and no_draft
+            else f"Could not produce a verified answer: {exc}"
+        )
         return {
-            "answer": f"Could not produce a verified answer: {exc}",
+            "answer": message,
             "answer_observation_ids": [],
             "answer_document_ids": [],
         }

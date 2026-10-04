@@ -7,6 +7,7 @@ normal question call. ``score_question`` scores a single question.
 from __future__ import annotations
 
 import random
+from datetime import UTC, datetime
 from typing import Any, TypeVar
 from uuid import uuid4
 
@@ -291,7 +292,7 @@ def _run_published(
     evaluators = [_replay(score_name, captured) for score_name in _enabled_names()]
     experiment = client.run_experiment(
         name=dataset.name,
-        run_name=f"{dataset.name} {dataset.version}",
+        run_name=_run_name(dataset.name, dataset.version),
         description="Referenceless benchmark of the BPS question agent",
         data=[item for item in remote_items if item.id in selected_ids],
         task=task,
@@ -337,7 +338,7 @@ def _run_conversations_published(
     evaluators = [_replay(name, captured) for name in _enabled_conversation_names()]
     experiment = client.run_experiment(
         name=dataset.name,
-        run_name=f"{dataset.name} {dataset.version}",
+        run_name=_run_name(dataset.name, dataset.version),
         description="Referenceless multi-turn benchmark of the BPS question agent",
         data=[item for item in remote_items if item.id in selected_ids],
         task=task,
@@ -349,6 +350,11 @@ def _run_conversations_published(
     report = format_report([(item.id, captured[item.id]) for item in selected])
     url = experiment.dataset_run_url or ""
     return f"{report}\n\n{url}" if url else report
+
+
+def _run_name(name: str, version: str) -> str:
+    """Give every execution its own Langfuse run; a run holds one result per item."""
+    return f"{name} {version} {datetime.now(UTC):%Y-%m-%dT%H:%M:%SZ}"
 
 
 def _check_scored(ids: set[str], captured: dict[str, list[ItemScore]], errors: dict[str, str]) -> None:

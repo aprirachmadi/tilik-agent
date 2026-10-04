@@ -27,6 +27,7 @@ class AgentJudgeLlm(DeepEvalBaseLLM):
             base_url=config.base_url,
             api_key=os.environ[config.api_key_env],
             extra_body=config.extra_body,
+            max_tokens=config.max_tokens,
         )
 
     def generate(self, prompt: str, schema: type[BaseModel] | None = None) -> Any:

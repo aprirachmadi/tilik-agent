@@ -61,6 +61,7 @@ class LlmConfig(BaseModel):
     temperature: float
     api_key_env: str
     extra_body: dict[str, Any]
+    max_tokens: int | None = None
 
 
 class EmbeddingConfig(BaseModel):
