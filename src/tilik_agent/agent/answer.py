@@ -218,7 +218,7 @@ placement; do not claim a chart exists until one is built.
 Write only in the user's language, except for cited names and quotations.
 Return an AnswerDraft with evidence IDs in its ID fields, not its text field.
 {direct_rule}{history_block(state.get("history"), "Conversation so far")}Question: {state["question"]}
-Plan: {compact_json(state.get("plan", {}))}
+Request intent: {compact_json(state.get("intent", {}))}
 Step status: {compact_json(state.get("step_status", {}))}
 Observations: {compact_json(evidence_rows(state.get("observations", [])))}
 Source details: {compact_json(evidence_source_details(state.get("source_details", {})))}

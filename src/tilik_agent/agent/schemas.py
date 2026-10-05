@@ -4,47 +4,35 @@ from __future__ import annotations
 
 from typing import Any, Literal, TypedDict
 
-from pydantic import BaseModel, Field, model_validator
-
-Action = Literal["sql_lookup", "retrieve_document", "calculate"]
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class PlanStep(BaseModel):
     id: str = Field(pattern=r"^s[1-9][0-9]*$")
-    action: Action
+    action: Literal["sql_lookup", "retrieve_document"]
     request: str = Field(min_length=3)
-    depends_on: list[str] = Field(default_factory=list)
 
 
-class WorkPlan(BaseModel):
+class RequestIntent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     question: str = Field(min_length=1)
-    steps: list[PlanStep] = Field(default_factory=list, max_length=8)
+    source_route: Literal["context", "data", "both", "direct"]
+    indicator: str | None = None
+    analysis_operation: Literal["correlation", "ols", "dispersion", "convergence", "paired_compare"] | None = None
     requested_chart: bool = False
-    requested_analysis: bool = False
     start_year: int | None = None
     end_year: int | None = None
     through_latest: bool = False
 
     @model_validator(mode="after")
-    def validate_steps(self) -> WorkPlan:
-        if not self.steps:
-            return self
-        ids = [step.id for step in self.steps]
-        if len(ids) != len(set(ids)):
-            raise ValueError("Step IDs must be unique")
-        seen: set[str] = set()
-        for step in self.steps:
-            if len(step.depends_on) != len(set(step.depends_on)):
-                raise ValueError("Duplicate dependencies")
-            if any(dep not in seen for dep in step.depends_on):
-                raise ValueError("Dependencies must refer to earlier steps")
-            if step.action == "calculate" and not step.depends_on:
-                raise ValueError("A calculation must depend on earlier evidence")
-            seen.add(step.id)
-        if not any(step.action != "calculate" for step in self.steps):
-            raise ValueError("A plan needs at least one source lookup")
-        if self.requested_analysis and not any(step.action == "sql_lookup" for step in self.steps):
-            raise ValueError("Analysis needs a SQL source lookup")
+    def validate_route(self) -> RequestIntent:
+        if self.analysis_operation and self.source_route not in {"data", "both"}:
+            raise ValueError("Statistical analysis needs SQL data")
+        if self.source_route == "direct" and self.requested_chart:
+            raise ValueError("A direct answer cannot request a chart")
+        if self.start_year and self.end_year and self.start_year > self.end_year:
+            raise ValueError("Start year follows end year")
         return self
 
 
@@ -136,7 +124,7 @@ class State(TypedDict, total=False):
     original_question: str
     history: list[ChatTurn]
     search_query: str
-    plan: dict[str, Any]
+    intent: dict[str, Any]
     source_route: Literal["context", "data", "both", "direct"]
     requested_chart: bool
     plan_error: str

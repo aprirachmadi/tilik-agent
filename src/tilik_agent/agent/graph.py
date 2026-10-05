@@ -8,14 +8,14 @@ from langgraph.graph.state import CompiledStateGraph
 from tilik_agent.agent.analysis import analyze_data, route_after_sources
 from tilik_agent.agent.answer import build_chart, chart_needed, write_answer
 from tilik_agent.agent.schemas import State
-from tilik_agent.agent.workers import plan_question, route_sources, run_both, run_retrieval, run_sql
+from tilik_agent.agent.workers import interpret_request, route_sources, run_both, run_retrieval, run_sql
 
 
 def compile_graph() -> CompiledStateGraph:
     """Compile the question graph. The caller streams it and supplies run config."""
     graph = StateGraph(State)
     for name, node in (
-        ("plan_question", plan_question),
+        ("interpret_request", interpret_request),
         ("run_retrieval", run_retrieval),
         ("run_sql", run_sql),
         ("run_both", run_both),
@@ -25,9 +25,9 @@ def compile_graph() -> CompiledStateGraph:
     ):
         graph.add_node(name, node)
 
-    graph.add_edge(START, "plan_question")
+    graph.add_edge(START, "interpret_request")
     graph.add_conditional_edges(
-        "plan_question",
+        "interpret_request",
         route_sources,
         {
             "context": "run_retrieval",

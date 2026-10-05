@@ -107,9 +107,9 @@ def _db_session() -> Session:
 
 def status_lines(update: dict[str, Any]) -> list[str]:
     """Map one graph update to the short progress lines the workspace shows."""
-    plan = update.get("plan_question")
-    if isinstance(plan, dict):
-        route = plan.get("source_route")
+    intent = update.get("interpret_request")
+    if isinstance(intent, dict):
+        route = intent.get("source_route")
         if route == "data":
             return ["Looking up datasets"]
         if route == "context":

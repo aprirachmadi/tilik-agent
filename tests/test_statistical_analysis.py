@@ -5,9 +5,9 @@ import math
 import pytest
 
 from tilik_agent.agent.geography import province_code, province_names
-from tilik_agent.agent.schemas import AnalysisRequest, SeriesSelection, WorkPlan
+from tilik_agent.agent.schemas import AnalysisRequest, RequestIntent, SeriesSelection
 from tilik_agent.agent.statistics import _resolve_rows, compute
-from tilik_agent.agent.workers import plan_question
+from tilik_agent.agent.workers import interpret_request
 
 
 def _selection(id_: str, periods: list[str]) -> SeriesSelection:
@@ -81,13 +81,13 @@ def test_correlation_joins_by_code_and_reports_sample_size(monkeypatch: pytest.M
     assert math.isclose(result.statistics["pearson_r"], 1.0)
 
 
-def test_planner_rejects_lost_explicit_year(monkeypatch: pytest.MonkeyPatch) -> None:
-    bad = WorkPlan.model_validate({
+def test_interpreter_rejects_lost_explicit_year(monkeypatch: pytest.MonkeyPatch) -> None:
+    bad = RequestIntent.model_validate({
         "question": "Apakah kesenjangan menyempit pada 201?",
-        "requested_analysis": True,
-        "steps": [{"id": "s1", "action": "sql_lookup", "request": "Cari data provinsi"}],
+        "source_route": "data",
+        "analysis_operation": "dispersion",
     })
     monkeypatch.setattr("tilik_agent.agent.workers.model_json", lambda schema, prompt: bad)
-    result = plan_question({"question": "Apakah kesenjangan menyempit sejak 2017?"})
+    result = interpret_request({"question": "Apakah kesenjangan menyempit sejak 2017?"})
     assert "plan_error" in result
     assert "lost an explicit user year" in result["plan_error"]

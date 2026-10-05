@@ -14,7 +14,7 @@ from pydantic import ValidationError
 
 from tilik_agent.agent.answer import _check_calculation, build_chart, chart_needed, validate_analysis, write_answer
 from tilik_agent.agent.graph import compile_graph
-from tilik_agent.agent.schemas import Analysis, Calculation, ChartPoint, ChartSpec, Finding, WorkPlan
+from tilik_agent.agent.schemas import Analysis, Calculation, ChartPoint, ChartSpec, Finding, PlanStep, RequestIntent
 from tilik_agent.agent.sql import (
     _harvest_describe_dataset,
     _harvest_get_observations,
@@ -23,7 +23,7 @@ from tilik_agent.agent.sql import (
     _sql_step_once,
     _tool_payload,
 )
-from tilik_agent.agent.workers import _execute_plan, plan_question, route_sources
+from tilik_agent.agent.workers import interpret_request, route_sources, run_both, run_retrieval, run_sql
 from tilik_agent.config import get_agent_config
 
 
@@ -36,14 +36,8 @@ def _observation(observation_id: int, value: float | None) -> dict[str, Any]:
     return {"observation_id": observation_id, "value": value}
 
 
-def _plan(*actions: str) -> dict[str, Any]:
-    steps: list[dict[str, Any]] = []
-    for index, action in enumerate(actions, start=1):
-        step: dict[str, Any] = {"id": f"s{index}", "action": action, "request": f"do {action}"}
-        if action == "calculate":
-            step["depends_on"] = [f"s{index - 1}"]
-        steps.append(step)
-    return {"question": "berapa TPT", "steps": steps, "requested_chart": True}
+def _intent(route: str = "data", operation: str | None = None) -> dict[str, Any]:
+    return {"question": "berapa TPT", "source_route": route, "analysis_operation": operation}
 
 
 @pytest.fixture
@@ -74,152 +68,74 @@ def test_route_sources(state: dict[str, Any], expected: str) -> None:
 
 
 @pytest.mark.parametrize(
-    ("actions", "expected"),
+    ("route", "expected"),
     [
-        (("sql_lookup", "retrieve_document"), "both"),
-        (("retrieve_document",), "context"),
-        (("sql_lookup",), "data"),
-        (("sql_lookup", "calculate"), "data"),
+        ("both", "both"),
+        ("context", "context"),
+        ("data", "data"),
     ],
 )
-def test_plan_question_sets_the_source_route(
+def test_interpret_request_sets_the_source_route(
     monkeypatch: pytest.MonkeyPatch,
-    actions: tuple[str, ...],
+    route: str,
     expected: str,
 ) -> None:
-    """
-    Condition:
-    The planner returns a valid work plan and no model is called.
-
-    Expected:
-    SQL plus publication search routes to both, publication search routes to context,
-    and a SQL lookup routes to data.
-    """
-    monkeypatch.setattr("tilik_agent.agent.workers.model_json", lambda schema, prompt: _plan(*actions))
-    result = plan_question({"question": "berapa TPT"})
+    monkeypatch.setattr(
+        "tilik_agent.agent.workers.model_json", lambda schema, prompt: _intent(route) | {"requested_chart": True}
+    )
+    result = interpret_request({"question": "berapa TPT"})
     assert result["source_route"] == expected
     assert result["requested_chart"] is True
     assert result["search_query"] == "berapa TPT"
 
 
-def test_plan_question_routes_direct_when_there_are_no_steps(monkeypatch: pytest.MonkeyPatch) -> None:
-    """
-    Condition:
-    The planner returns a valid work plan with no lookup steps.
-
-    Expected:
-    The source route is direct and charting is disabled.
-    """
+def test_interpret_request_routes_direct(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "tilik_agent.agent.workers.model_json",
-        lambda schema, prompt: {"question": "Hi", "steps": [], "requested_chart": False},
+        lambda schema, prompt: {"question": "Hi", "source_route": "direct"},
     )
-    result = plan_question({"question": "Hi"})
+    result = interpret_request({"question": "Hi"})
     assert result["source_route"] == "direct"
     assert result["requested_chart"] is False
-    assert result["plan"]["steps"] == []
+    assert result["intent"]["source_route"] == "direct"
 
 
-def test_plan_question_retries_once_then_keeps_the_valid_plan(monkeypatch: pytest.MonkeyPatch) -> None:
-    """
-    Condition:
-    The first planner response is not a valid work plan and the second response is.
-
-    Expected:
-    The retry prompt includes the validation error, and the valid plan is returned.
-    """
+def test_interpret_request_retries_invalid_intent(monkeypatch: pytest.MonkeyPatch) -> None:
     prompts: list[str] = []
 
-    def fake_model(schema: type[WorkPlan], prompt: str) -> dict[str, Any]:
+    def fake_model(schema: type[RequestIntent], prompt: str) -> dict[str, Any]:
         prompts.append(prompt)
         if len(prompts) == 1:
-            return {"question": "berapa TPT", "steps": [{"id": "s1", "action": "calculate", "request": "add them"}]}
-        return _plan("sql_lookup")
+            return _intent("direct") | {"requested_chart": True}
+        return _intent()
 
     monkeypatch.setattr("tilik_agent.agent.workers.model_json", fake_model)
-    result = plan_question({"question": "berapa TPT"})
-    assert "Previous invalid plan" in prompts[1]
+    result = interpret_request({"question": "berapa TPT"})
+    assert "Previous invalid intent" in prompts[1]
     assert result["source_route"] == "data"
 
 
-def test_plan_question_reports_a_plan_that_never_validates(monkeypatch: pytest.MonkeyPatch) -> None:
-    """
-    Condition:
-    Both planner attempts raise a validation error.
-
-    Expected:
-    The node returns a plan error and no source route.
-    """
-
-    def fail(schema: type[WorkPlan], prompt: str) -> dict[str, Any]:
-        raise ValueError("not a plan")
+def test_interpret_request_reports_invalid_intent(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail(schema: type[RequestIntent], prompt: str) -> dict[str, Any]:
+        raise ValueError("not an intent")
 
     monkeypatch.setattr("tilik_agent.agent.workers.model_json", fail)
-    result = plan_question({"question": "berapa TPT"})
-    assert result["plan_error"].startswith("Could not validate the work plan:")
+    result = interpret_request({"question": "berapa TPT"})
+    assert result["plan_error"].startswith("Could not validate request intent:")
     assert "source_route" not in result
 
 
 @pytest.mark.parametrize(
     ("payload", "message"),
     [
-        (
-            {
-                "question": "lookup",
-                "steps": [
-                    {"id": "s1", "action": "sql_lookup", "request": "lookup tpt"},
-                    {"id": "s1", "action": "sql_lookup", "request": "lookup aps"},
-                ],
-            },
-            "Step IDs must be unique",
-        ),
-        (
-            {
-                "question": "lookup",
-                "steps": [
-                    {"id": "s1", "action": "sql_lookup", "request": "lookup tpt", "depends_on": ["s1"]},
-                ],
-            },
-            "Dependencies must refer to earlier steps",
-        ),
-        (
-            {
-                "question": "lookup",
-                "steps": [
-                    {"id": "s1", "action": "sql_lookup", "request": "lookup tpt"},
-                    {"id": "s2", "action": "calculate", "request": "add the values", "depends_on": ["s1", "s1"]},
-                ],
-            },
-            "Duplicate dependencies",
-        ),
-        (
-            {"question": "calc", "steps": [{"id": "s1", "action": "calculate", "request": "add them"}]},
-            "A calculation must depend on earlier evidence",
-        ),
+        (_intent("direct", "dispersion"), "Statistical analysis needs SQL data"),
+        (_intent("direct") | {"requested_chart": True}, "A direct answer cannot request a chart"),
+        (_intent() | {"steps": []}, "Extra inputs are not permitted"),
     ],
 )
-def test_work_plan_rejects_invalid_steps(payload: dict[str, Any], message: str) -> None:
-    """
-    Condition:
-    A work plan with duplicate ids, a backward dependency, a repeated dependency, or a calculation with no source.
-
-    Expected:
-    Validation fails with the matching reason.
-    """
+def test_request_intent_rejects_invalid_routes(payload: dict[str, Any], message: str) -> None:
     with pytest.raises(ValidationError, match=message):
-        WorkPlan.model_validate(payload)
-
-
-def test_work_plan_accepts_an_empty_step_list() -> None:
-    """
-    Condition:
-    A work plan declares no lookup steps for a direct answer.
-
-    Expected:
-    Validation succeeds.
-    """
-    plan = WorkPlan.model_validate({"question": "Hi", "steps": [], "requested_chart": False})
-    assert plan.steps == []
+        RequestIntent.model_validate(payload)
 
 
 @pytest.mark.parametrize(
@@ -345,116 +261,100 @@ def test_validate_analysis_rejects_a_missing_calculation_value() -> None:
         validate_analysis(proposed, [_observation(1, None)], [])
 
 
-def test_execute_plan_marks_a_lookup_succeeded(monkeypatch: pytest.MonkeyPatch) -> None:
-    """
-    Condition:
-    One SQL step returns an observation and a warning.
-
-    Expected:
-    The step succeeds, and the warning is kept beside the observation.
-    """
-
-    def sql_step(step: Any, question: str, dependency: str = "") -> dict[str, Any]:
-        return {
-            "observations": [_observation(1, 6.96) | {"step_id": step.id}],
-            "sql_warnings": "truncated",
-        }
+def test_run_sql_marks_a_lookup_succeeded(monkeypatch: pytest.MonkeyPatch) -> None:
+    def sql_step(step: Any, question: str, **kwargs: Any) -> dict[str, Any]:
+        return {"observations": [_observation(1, 6.96) | {"step_id": step.id}], "sql_warnings": "truncated"}
 
     monkeypatch.setattr("tilik_agent.agent.workers._sql_step", sql_step)
-    result = _execute_plan({"question": "berapa TPT", "plan": _plan("sql_lookup")})
+    result = run_sql({"question": "berapa TPT", "intent": _intent()})
     assert result["step_status"]["s1"]["status"] == "succeeded"
     assert result["step_status"]["s1"]["warning"] == "truncated"
     assert result["observations"] == [_observation(1, 6.96) | {"step_id": "s1"}]
     assert result["sql_warnings"] == "truncated"
 
 
-def test_execute_plan_marks_truncated_rows_partial(monkeypatch: pytest.MonkeyPatch) -> None:
-    def sql_step(step: Any, question: str, dependency: str = "") -> dict[str, Any]:
+def test_run_sql_marks_truncated_rows_partial(monkeypatch: pytest.MonkeyPatch) -> None:
+    def sql_step(step: Any, question: str, **kwargs: Any) -> dict[str, Any]:
         return {
             "observations": [_observation(1, 6.96) | {"step_id": step.id, "truncated_batch": True}],
             "sql_warnings": "get_observations returned a truncated result",
         }
 
     monkeypatch.setattr("tilik_agent.agent.workers._sql_step", sql_step)
-    result = _execute_plan({"question": "berapa TPT", "plan": _plan("sql_lookup")})
+    result = run_sql({"question": "berapa TPT", "intent": _intent()})
     assert result["step_status"]["s1"]["status"] == "partial"
 
 
-def test_execute_plan_marks_an_empty_lookup_failed(monkeypatch: pytest.MonkeyPatch) -> None:
-    """
-    Condition:
-    One SQL step returns an error and no rows.
-
-    Expected:
-    The step is failed and the SQL error is stored on the aggregate.
-    """
-
-    def sql_step(step: Any, question: str, dependency: str = "") -> dict[str, Any]:
+def test_run_sql_marks_an_empty_lookup_failed(monkeypatch: pytest.MonkeyPatch) -> None:
+    def sql_step(step: Any, question: str, **kwargs: Any) -> dict[str, Any]:
         return {"sql_error": "no table"}
 
     monkeypatch.setattr("tilik_agent.agent.workers._sql_step", sql_step)
-    result = _execute_plan({"question": "berapa TPT", "plan": _plan("sql_lookup")})
+    result = run_sql({"question": "berapa TPT", "intent": _intent()})
     assert result["step_status"]["s1"]["status"] == "failed"
     assert result["step_status"]["s1"]["error"] == "no table"
     assert result["sql_error"] == "no table"
 
 
-def test_execute_plan_marks_partial_evidence(monkeypatch: pytest.MonkeyPatch) -> None:
-    """
-    Condition:
-    A publication search returns a document and a retrieval error.
-
-    Expected:
-    The step is partial because it has evidence and a blocking error.
-    """
-
+def test_run_retrieval_marks_partial_evidence(monkeypatch: pytest.MonkeyPatch) -> None:
     def retrieve_step(step: Any, question: str, dependency: str = "") -> dict[str, Any]:
         return {"documents": [{"id": "d1", "step_id": step.id}], "retrieval_error": "none graded"}
 
     monkeypatch.setattr("tilik_agent.agent.workers._retrieve_step", retrieve_step)
-    result = _execute_plan({"question": "berapa", "plan": _plan("retrieve_document")})
+    result = run_retrieval({"question": "berapa", "intent": _intent("context")})
     assert result["step_status"]["s1"]["status"] == "partial"
     assert result["documents"] == [{"id": "d1", "step_id": "s1"}]
 
 
-def test_execute_plan_blocks_a_step_after_a_failed_dependency(monkeypatch: pytest.MonkeyPatch) -> None:
-    """
-    Condition:
-    A SQL lookup fails, and a calculation depends on it.
+def test_run_both_joins_independent_sources(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "tilik_agent.agent.workers._sql_source", lambda state: {"observations": [_observation(1, 6.96)]}
+    )
+    monkeypatch.setattr(
+        "tilik_agent.agent.workers._retrieval_source",
+        lambda state, step_id="s1": {"documents": [{"id": "d1", "step_id": step_id}]},
+    )
+    result = run_both({"question": "berapa", "intent": _intent("both")})
+    assert result["step_status"]["s1"]["status"] == "succeeded"
+    assert result["step_status"]["s2"]["status"] == "succeeded"
+    assert result["documents"] == [{"id": "d1", "step_id": "s2"}]
 
-    Expected:
-    The calculation is blocked and does not run.
-    """
 
-    def sql_step(step: Any, question: str, dependency: str = "") -> dict[str, Any]:
-        return {"sql_error": "no table"}
+def test_statistical_sql_repairs_missing_latest_year(monkeypatch: pytest.MonkeyPatch) -> None:
+    years = [["2017", "2025"], ["2017", "2025", "2026"]]
+    requests: list[str] = []
 
-    def calculate_step(step: Any, prior: dict[str, Any]) -> dict[str, Any]:
-        raise AssertionError("calculation ran after a failed lookup")
+    def sql_step(step: PlanStep, question: str, **kwargs: Any) -> dict[str, Any]:
+        requests.append(step.request)
+        periods = years[len(requests) - 1]
+        return {
+            "series_selections": [
+                {
+                    "selection_id": "sel",
+                    "dataset_id": 1,
+                    "measure_id": 2,
+                    "period_ids": list(range(len(periods))),
+                    "period_labels": periods,
+                    "member_ids": [3],
+                    "dataset_title": "P0",
+                    "measure_name": "P0",
+                    "coverage": {year: {"count": 34} for year in periods},
+                    "observation_ids": [],
+                }
+            ],
+        }
+
+    def time_error(intent: RequestIntent, selection: Any) -> str:
+        return "missing 2026" if "2026" not in selection.period_labels else ""
 
     monkeypatch.setattr("tilik_agent.agent.workers._sql_step", sql_step)
-    monkeypatch.setattr("tilik_agent.agent.workers._calculate_step", calculate_step)
-    result = _execute_plan({"question": "berapa", "plan": _plan("sql_lookup", "calculate")})
-    assert result["step_status"]["s2"]["status"] == "failed"
-    assert "s1" in result["step_status"]["s2"]["error"]
-
-
-def test_execute_plan_keeps_the_latest_copy_of_an_observation(monkeypatch: pytest.MonkeyPatch) -> None:
-    """
-    Condition:
-    Two SQL steps return the same observation id with different values.
-
-    Expected:
-    The aggregate keeps one row, and that row is the later step's copy.
-    """
-
-    def sql_step(step: Any, question: str, dependency: str = "") -> dict[str, Any]:
-        value = 1 if step.id == "s1" else 2
-        return {"observations": [_observation(7, value) | {"step_id": step.id}]}
-
-    monkeypatch.setattr("tilik_agent.agent.workers._sql_step", sql_step)
-    result = _execute_plan({"question": "berapa", "plan": _plan("sql_lookup", "sql_lookup")})
-    assert result["observations"] == [_observation(7, 2) | {"step_id": "s2"}]
+    monkeypatch.setattr("tilik_agent.agent.workers.selection_time_error", time_error)
+    intent = _intent(operation="dispersion") | {"start_year": 2017, "through_latest": True}
+    result = run_sql({"question": "Apakah kesenjangan menyempit sejak 2017?", "intent": intent})
+    assert len(requests) == 2
+    assert "missing 2026" in requests[1]
+    assert result["series_selections"][0]["period_labels"][-1] == "2026"
+    assert result["step_status"]["s1"]["status"] == "succeeded"
 
 
 @pytest.mark.parametrize(
@@ -700,7 +600,7 @@ def test_sql_step_publishes_each_inner_update(monkeypatch: pytest.MonkeyPatch) -
 
     monkeypatch.setattr("tilik_agent.agent.sql.get_sql_agent", lambda: _Agent())
     monkeypatch.setattr("tilik_agent.agent.sql.get_stream_writer", lambda: published.append)
-    _sql_step_once(WorkPlan.model_validate(_plan("sql_lookup")).steps[0], "berapa TPT")
+    _sql_step_once(PlanStep(id="s1", action="sql_lookup", request="berapa TPT"), "berapa TPT")
     assert [(list(update), next(iter(update.values()))["step_id"]) for update in published] == [
         (["agent"], "s1"),
         (["tools"], "s1"),
@@ -731,7 +631,7 @@ def test_sql_step_inside_a_graph_node_streams_inner_updates(monkeypatch: pytest.
     inner.add_edge("agent", "tools")
     inner.add_edge("tools", END)
     monkeypatch.setattr("tilik_agent.agent.sql.get_sql_agent", lambda: inner.compile())
-    step = WorkPlan.model_validate(_plan("sql_lookup")).steps[0]
+    step = PlanStep(id="s1", action="sql_lookup", request="berapa TPT")
 
     def run_sql(state: _ParentState) -> _ParentState:
         return {"result": _sql_step_once(step, state["question"])}
@@ -774,7 +674,7 @@ def test_sql_step_puts_partial_tool_errors_on_warnings(monkeypatch: pytest.Monke
 
     monkeypatch.setattr("tilik_agent.agent.sql.get_agent_config", lambda: limited)
     monkeypatch.setattr("tilik_agent.agent.sql.get_sql_agent", lambda: _Agent())
-    result = _sql_step_once(WorkPlan.model_validate(_plan("sql_lookup")).steps[0], "berapa TPT")
+    result = _sql_step_once(PlanStep(id="s1", action="sql_lookup", request="berapa TPT"), "berapa TPT")
     assert result["observations"][0]["value"] == 6.96
     assert result["sql_error"] == ""
     assert "tool-round limit (1)" in result["sql_warnings"]
@@ -794,7 +694,7 @@ def test_sql_step_reports_a_recursion_limit_without_rows(monkeypatch: pytest.Mon
             raise GraphRecursionError("limit")
 
     monkeypatch.setattr("tilik_agent.agent.sql.get_sql_agent", lambda: _Agent())
-    result = _sql_step_once(WorkPlan.model_validate(_plan("sql_lookup")).steps[0], "berapa TPT")
+    result = _sql_step_once(PlanStep(id="s1", action="sql_lookup", request="berapa TPT"), "berapa TPT")
     limit = get_agent_config().graph.recursion_limit
     assert result["observations"] == []
     assert result["sql_error"] == f"SQL graph recursion limit ({limit}) reached"
@@ -811,8 +711,10 @@ def test_compiled_graph_connects_plan_routes_and_chart() -> None:
     """
     graph = compile_graph().get_graph()
     edges = {(edge.source, edge.target) for edge in graph.edges}
-    assert (START, "plan_question") in edges
-    assert {("plan_question", target) for target in ("run_retrieval", "run_sql", "run_both", "write_answer")} <= edges
+    assert (START, "interpret_request") in edges
+    assert {
+        ("interpret_request", target) for target in ("run_retrieval", "run_sql", "run_both", "write_answer")
+    } <= edges
     assert {("run_retrieval", "write_answer"), ("run_sql", "write_answer"), ("run_both", "write_answer")} <= edges
     assert ("write_answer", "build_chart") in edges
     assert ("write_answer", END) in edges

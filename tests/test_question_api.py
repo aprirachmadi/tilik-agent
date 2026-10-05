@@ -149,7 +149,7 @@ class _PlacedChartGraph:
 
 class _WorkspaceGraph:
     def stream(self, state: dict[str, Any], config: dict[str, Any], stream_mode: list[str]) -> Iterator[dict[str, Any]]:
-        yield {"plan_question": {"question": "berapa TPT Papua", "source_route": "both"}}
+        yield {"interpret_request": {"question": "berapa TPT Papua", "source_route": "both"}}
         yield {"agent": {"messages": ["lookup"]}}
         yield {
             "run_both": {
@@ -230,11 +230,11 @@ def _events(body: str) -> list[tuple[str, dict[str, Any]]]:
 @pytest.mark.parametrize(
     ("update", "expected"),
     [
-        ({"plan_question": {"source_route": "data"}}, ["Looking up datasets"]),
-        ({"plan_question": {"source_route": "context"}}, ["Searching SP2020"]),
-        ({"plan_question": {"source_route": "both"}}, ["Looking up datasets", "Searching SP2020"]),
-        ({"plan_question": {"source_route": "direct"}}, ["Writing the answer"]),
-        ({"plan_question": {"plan_error": "invalid"}}, ["Writing the answer"]),
+        ({"interpret_request": {"source_route": "data"}}, ["Looking up datasets"]),
+        ({"interpret_request": {"source_route": "context"}}, ["Searching SP2020"]),
+        ({"interpret_request": {"source_route": "both"}}, ["Looking up datasets", "Searching SP2020"]),
+        ({"interpret_request": {"source_route": "direct"}}, ["Writing the answer"]),
+        ({"interpret_request": {"plan_error": "invalid"}}, ["Writing the answer"]),
         ({"run_sql": {}}, ["Writing the answer"]),
         ({"run_retrieval": {}}, ["Writing the answer"]),
         ({"run_both": {}}, ["Writing the answer"]),

@@ -1,4 +1,4 @@
-"""Planning, calculation, and plan execution from the end-to-end notebook."""
+"""Interpret a question and run its fixed source routes."""
 
 from __future__ import annotations
 
@@ -10,106 +10,63 @@ from typing import Any, Literal
 from openai import APIError
 from pydantic import ValidationError
 
-from tilik_agent.agent.answer import validate_analysis
+from tilik_agent.agent.analysis import selection_time_error
 from tilik_agent.agent.retrieval import _retrieve_step
-from tilik_agent.agent.runtime import compact_json, evidence_rows, history_block, model_json
-from tilik_agent.agent.schemas import Analysis, PlanStep, State, WorkPlan
+from tilik_agent.agent.runtime import history_block, model_json
+from tilik_agent.agent.schemas import PlanStep, RequestIntent, SeriesSelection, State
 from tilik_agent.agent.sql import _sql_step
 from tilik_agent.agent.tracing import bind_trace_context
 
 
-def plan_question(state: State) -> dict[str, Any]:
-    original_question = state.get("original_question") or state["question"]
-    history = state.get("history") or []
-    prompt = f"""Plan source work for a BPS statistics assistant. Return a WorkPlan.
-Allowed actions: sql_lookup, retrieve_document, calculate. No web lookup exists.
-SQL has BPS observation tables; retrieve_document searches only the configured
-publication collection and cannot answer questions outside its content.
-Keep dependencies in depends_on. The SQL agent can perform several dependent
-dataset lookups in ONE sql_lookup step; prefer that for a SQL-only question.
-Do not create calculate steps when the SQL agent can select a ranking as part
-of its lookup. Use calculate for arithmetic needed between independent lookups.
-Never assume that a document search can provide a missing SQL value.
-Set WorkPlan.question to a standalone version of the latest user message. When
-recent conversation is present, resolve follow-ups such as "what about 2024?"
-into a full question with place, indicator, and period.
-Set requested_analysis for relationships/correlation, regression/residuals,
-province dispersion over time, convergence, and paired province comparisons.
-When requested_analysis is true, include a sql_lookup step and specify exact
-start_year/end_year or through_latest for 'since' questions. Preserve every
-explicit year and the original time meaning. The SQL agent selects series;
-do not put bulk province rows in the plan or request them from get_observations.
-Return steps: [] when the latest message needs no new BPS SQL or publication lookup
-(greetings, who are you, or confirming numbers already stated in the conversation).
-When steps is empty, requested_chart must be false.
-{history_block(history, "Recent conversation")}Latest user message: {original_question}"""
+def interpret_request(state: State) -> dict[str, Any]:
+    original = state.get("original_question") or state["question"]
+    prompt = f"""Interpret the latest question for a BPS statistics assistant.
+Return RequestIntent, not a sequence of work steps. The graph owns execution.
+Use source_route=data for BPS observation tables, context for passages in the
+configured publication collection, both only when both types of evidence are
+needed, and direct only when the conversation already supplies the answer or
+the user needs no lookup. Publication search cannot fill missing SQL values.
+For province dispersion over time choose analysis_operation=dispersion; for
+relationship choose correlation, fitted models/outliers choose ols, initial
+level versus change choose convergence, and paired survey rounds choose
+paired_compare. Otherwise use null. Statistical analysis requires SQL data.
+Extract the indicator without inventing a dataset ID. Preserve exact years.
+For 'since 2017' set start_year=2017 and through_latest=true; do not guess
+the latest available year. Do not request a chart for a direct answer.
+Resolve follow-ups into a standalone question using the recent conversation.
+{history_block(state.get("history"), "Recent conversation")}Latest user message: {original}"""
     error = ""
     for attempt in range(2):
         try:
-            plan = model_json(WorkPlan, prompt if attempt == 0 else prompt + f"\nPrevious invalid plan: {error}")
-            plan = WorkPlan.model_validate(plan)
-            lowered = original_question.casefold()
-            analytic_cues = (
-                "seberapa kuat hubungan",
-                "cenderung memiliki",
-                "paling menyimpang",
-                "menyempit sejak",
-                "sebagian besar provinsi",
-                "paling miskin",
-                "konvergen",
-                "korelasi",
-                "regresi",
+            intent = model_json(
+                RequestIntent, prompt if not attempt else prompt + f"\nPrevious invalid intent: {error}"
             )
-            if any(cue in lowered for cue in analytic_cues):
-                if not plan.steps:
-                    raise ValueError("Analysis question needs a source lookup")
-                plan.requested_analysis = True
-            years = {int(value) for value in re.findall(r"(?<!\d)(?:19|20)\d{2}(?!\d)", original_question)}
-            if "sejak" in lowered and len(years) == 1 and plan.requested_analysis:
-                plan.start_year = next(iter(years))
-                plan.through_latest = True
-            elif plan.requested_analysis and years:
-                plan.start_year = min(years)
-                plan.end_year = max(years)
-            elif plan.requested_analysis and "biasanya" in lowered:
-                plan.through_latest = True
-            if plan.requested_analysis and not any(step.action == "sql_lookup" for step in plan.steps):
-                raise ValueError("Analysis requires a SQL lookup step")
-            if years - {int(value) for value in re.findall(r"(?<!\d)(?:19|20)\d{2}(?!\d)", plan.question)}:
+            intent = RequestIntent.model_validate(intent)
+            years = {int(value) for value in re.findall(r"(?<!\d)(?:19|20)\d{2}(?!\d)", original)}
+            standalone_years = {int(value) for value in re.findall(r"(?<!\d)(?:19|20)\d{2}(?!\d)", intent.question)}
+            if years - standalone_years:
                 raise ValueError("Standalone question lost an explicit user year")
-            if "sejak" in original_question.casefold() and years and plan.requested_analysis:
-                start = min(years)
-                if plan.start_year != start or (len(years) == 1 and not plan.through_latest):
-                    raise ValueError(f"Analysis must preserve since {start} through latest available")
-            standalone = plan.question.strip() or original_question
-            if not plan.steps:
-                return {
-                    "original_question": original_question,
-                    "question": standalone,
-                    "plan": plan.model_dump(),
-                    "source_route": "direct",
-                    "requested_chart": False,
-                    "search_query": standalone,
-                }
-            actions = {step.action for step in plan.steps}
-            route: Literal["context", "data", "both"] = (
-                "both"
-                if {"sql_lookup", "retrieve_document"} <= actions
-                else "context"
-                if "retrieve_document" in actions
-                else "data"
-            )
+            lowered = original.casefold()
+            if "menyempit sejak" in lowered and intent.analysis_operation != "dispersion":
+                raise ValueError("Province gap over time requires dispersion analysis")
+            if intent.analysis_operation and "sejak" in lowered and len(years) == 1:
+                intent.start_year = next(iter(years))
+                intent.end_year = None
+                intent.through_latest = True
+            elif intent.analysis_operation and years:
+                intent.start_year = min(years)
+                intent.end_year = max(years)
             return {
-                "original_question": original_question,
-                "question": standalone,
-                "plan": plan.model_dump(),
-                "source_route": route,
-                "requested_chart": plan.requested_chart,
-                "search_query": standalone,
+                "original_question": original,
+                "question": intent.question.strip(),
+                "intent": intent.model_dump(),
+                "source_route": intent.source_route,
+                "requested_chart": intent.requested_chart,
+                "search_query": intent.question.strip(),
             }
         except (ValidationError, ValueError, json.JSONDecodeError, APIError) as exc:
             error = str(exc)
-    return {"plan_error": f"Could not validate the work plan: {error}"}
+    return {"plan_error": f"Could not validate request intent: {error}"}
 
 
 def route_sources(state: State) -> Literal["context", "data", "both", "direct", "plan_failed"]:
@@ -118,136 +75,95 @@ def route_sources(state: State) -> Literal["context", "data", "both", "direct", 
     return state["source_route"]
 
 
-def _calculate_step(step: PlanStep, prior: dict[str, Any]) -> dict[str, Any]:
-    """Calculation steps are selected by the LLM and verified from row IDs."""
-    rows = prior.get("observations", [])
-    if not rows:
-        return {"error": "No observations available for calculation"}
-    prompt = f"""Select the calculation requested below using only these rows.
-Return an Analysis with calculations and findings. Every numeric input must
-cite observation IDs. Request: {step.request}\nRows: {compact_json(evidence_rows(rows))}"""
-    try:
-        proposed = model_json(Analysis, prompt)
-        validated = validate_analysis(proposed, rows, prior.get("documents", []))
-        return {"analysis": validated.model_dump()}
-    except (ValidationError, ValueError, APIError) as exc:
-        return {"error": f"Calculation validation failed: {exc}"}
+def _sql_source(state: State) -> dict[str, Any]:
+    intent = RequestIntent.model_validate(state["intent"])
+    analysis = intent.analysis_operation is not None
+    scope = f"start_year={intent.start_year}, end_year={intent.end_year}, through_latest={intent.through_latest}"
+    request = state["question"]
+    for attempt in range(2 if analysis else 1):
+        step = PlanStep(id="s1", action="sql_lookup", request=request)
+        result = _sql_step(step, state["question"], analysis=analysis, time_scope=scope)
+        if not analysis:
+            return result
+        valid: list[dict[str, Any]] = []
+        errors: list[str] = []
+        for item in result.get("series_selections", []):
+            selection = SeriesSelection.model_validate(item)
+            error = selection_time_error(intent, selection)
+            if error:
+                errors.append(error)
+            else:
+                valid.append(item)
+        required = 1 if intent.analysis_operation in {"dispersion", "convergence"} else 2
+        if len(valid) >= required:
+            result["series_selections"] = valid
+            return result
+        reason = "; ".join(errors) or result.get("sql_error") or "SQL did not provide enough province series"
+        if attempt == 0:
+            request = f"{state['question']}\nRepair the previous selection: {reason}. Select every required year."
+            continue
+        result["series_selections"] = []
+        result["sql_error"] = reason
+    return result
 
 
-def _merge_result(target: dict[str, Any], result: dict[str, Any]) -> None:
-    target["documents"].extend(result.get("documents", []))
-    target["observations"].extend(result.get("observations", []))
-    target["series_selections"].extend(result.get("series_selections", []))
-    source = result.get("source_details", {})
-    target["source_details"]["searches"].extend(source.get("searches", []))
-    target["source_details"]["datasets"].update(source.get("datasets", {}))
-    for key in ("retrieval_error", "sql_error", "sql_warnings"):
-        if result.get(key):
-            target[key] = "; ".join(filter(None, [target.get(key), result[key]]))
-    if result.get("search_query"):
-        target["search_query"] = result["search_query"]
-    if result.get("analysis"):
-        previous = target.setdefault(
-            "intermediate_analysis",
-            {"findings": [], "calculations": [], "limitations": []},
-        )
-        for key in ("findings", "calculations", "limitations"):
-            previous[key].extend(result["analysis"].get(key, []))
+def _retrieval_source(state: State, step_id: str = "s1") -> dict[str, Any]:
+    return _retrieve_step(
+        PlanStep(id=step_id, action="retrieve_document", request=state["question"]), state["question"]
+    )
 
 
-def _execute_plan(state: State) -> dict[str, Any]:
-    plan = WorkPlan.model_validate(state["plan"])
-    aggregate: dict[str, Any] = {
+def _merge_sources(items: list[tuple[str, dict[str, Any]]]) -> dict[str, Any]:
+    merged: dict[str, Any] = {
         "documents": [],
         "observations": [],
         "series_selections": [],
         "source_details": {"searches": [], "datasets": {}},
         "step_status": {},
     }
-    pending = {step.id: step for step in plan.steps}
-    while pending:
-        ready = [
-            step
-            for step in plan.steps
-            if step.id in pending and all(dep in aggregate["step_status"] for dep in step.depends_on)
-        ]
-        if not ready:
-            raise ValueError("Validated plan has unresolved dependencies")
-
-        def execute(step: PlanStep) -> tuple[str, dict[str, Any]]:
-            failures = [dep for dep in step.depends_on if aggregate["step_status"][dep]["status"] != "succeeded"]
-            if failures:
-                return step.id, {"error": f"Blocked by failed dependencies: {failures}"}
-            dependent_rows = [row for row in aggregate["observations"] if row.get("step_id") in step.depends_on]
-            dependent_docs = [doc for doc in aggregate["documents"] if doc.get("step_id") in step.depends_on]
-            context = compact_json(
-                {
-                    "observations": evidence_rows(dependent_rows),
-                    "documents": dependent_docs,
-                    "calculations": aggregate.get("intermediate_analysis", {}),
-                }
-            )
-            if step.action == "sql_lookup":
-                dependency = context if step.depends_on else ""
-                if plan.requested_analysis:
-                    scope = (
-                        f"start_year={plan.start_year}, end_year={plan.end_year}, through_latest={plan.through_latest}"
-                    )
-                    return step.id, _sql_step(step, state["question"], dependency, analysis=True, time_scope=scope)
-                return step.id, _sql_step(step, state["question"], dependency)
-            if step.action == "retrieve_document":
-                return step.id, _retrieve_step(step, state["question"], context if step.depends_on else "")
-            return step.id, _calculate_step(step, aggregate)
-
-        # Snapshot the question trace here. The pool worker does not inherit it.
-        jobs = [bind_trace_context(execute, step) for step in ready]
-
-        def run_job(job: Any) -> tuple[str, dict[str, Any]]:
-            return job()
-
-        with ThreadPoolExecutor(max_workers=min(2, len(ready))) as pool:
-            results = list(pool.map(run_job, jobs))
-        for step_id, result in results:
-            _merge_result(aggregate, result)
-            step = pending.pop(step_id)
-            evidence_count = (
-                len(result.get("observations", []))
-                + len(result.get("series_selections", []))
-                + len(result.get("documents", []))
-                + len(result.get("analysis", {}).get("findings", []))
-            )
-            blocking = (
-                result.get("error")
-                or result.get("retrieval_error")
-                or (result.get("sql_error") if not evidence_count else "")
-            )
-            warning = result.get("sql_warnings") or ""
-            incomplete_rows = any(row.get("truncated_batch") for row in result.get("observations", []))
-            if evidence_count and not blocking and not incomplete_rows:
-                status = "succeeded"
-            elif evidence_count:
-                status = "partial"
-            else:
-                status = "failed"
-            aggregate["step_status"][step_id] = {
-                "action": step.action,
-                "status": status,
-                "error": blocking or "",
-                "warning": warning,
-                "evidence_count": evidence_count,
-            }
-    # De-duplicate observations fetched by more than one tool call.
-    aggregate["observations"] = list({row["observation_id"]: row for row in aggregate["observations"]}.values())
-    return aggregate
-
-
-def run_retrieval(state: State) -> dict[str, Any]:
-    return _execute_plan(state)
+    for action, result in items:
+        step_id = "s1" if action == "sql_lookup" or len(items) == 1 else "s2"
+        for key in ("documents", "observations", "series_selections"):
+            merged[key].extend(result.get(key, []))
+        details = result.get("source_details") or {}
+        merged["source_details"]["searches"].extend(details.get("searches", []))
+        merged["source_details"]["datasets"].update(details.get("datasets", {}))
+        for key in ("retrieval_error", "sql_error", "sql_warnings"):
+            if result.get(key):
+                merged[key] = result[key]
+        if result.get("search_query"):
+            merged["search_query"] = result["search_query"]
+        count = sum(len(result.get(key, [])) for key in ("documents", "observations", "series_selections"))
+        error = result.get("retrieval_error") or (result.get("sql_error") if not count else "") or ""
+        truncated = any(row.get("truncated_batch") for row in result.get("observations", []))
+        status = "succeeded" if count and not error and not truncated else "partial" if count else "failed"
+        merged["step_status"][step_id] = {
+            "action": action,
+            "status": status,
+            "error": error,
+            "warning": result.get("sql_warnings") or "",
+            "evidence_count": count,
+        }
+    return merged
 
 
 def run_sql(state: State) -> dict[str, Any]:
-    return _execute_plan(state)
+    return _merge_sources([("sql_lookup", _sql_source(state))])
+
+
+def run_retrieval(state: State) -> dict[str, Any]:
+    return _merge_sources([("retrieve_document", _retrieval_source(state))])
 
 
 def run_both(state: State) -> dict[str, Any]:
-    return _execute_plan(state)
+    sql_job = bind_trace_context(_sql_source, state)
+    retrieval_job = bind_trace_context(_retrieval_source, state, "s2")
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        sql_future = pool.submit(sql_job)
+        retrieval_future = pool.submit(retrieval_job)
+        return _merge_sources(
+            [
+                ("sql_lookup", sql_future.result()),
+                ("retrieve_document", retrieval_future.result()),
+            ]
+        )

@@ -32,7 +32,7 @@ def main() -> None:
     selections = state.get("series_selections") or []
     analysis = state.get("analysis_results") or []
     status, comment = pipeline_status_label(result.step_status, result.plan_error)
-    print(f"\n=== plan ===\n{json.dumps(state.get('plan', {}), ensure_ascii=False, indent=2)}")
+    print(f"\n=== request intent ===\n{json.dumps(state.get('intent', {}), ensure_ascii=False, indent=2)}")
     print(f"\n=== step status ===\n{json.dumps(result.step_status, ensure_ascii=False, indent=2)}")
     print(f"\npipeline_status: {status} {comment}")
     print(f"observations fetched: {len(rows)} (truncated batch: {any(row.get('truncated_batch') for row in rows)})")
