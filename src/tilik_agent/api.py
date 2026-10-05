@@ -118,6 +118,10 @@ def status_lines(update: dict[str, Any]) -> list[str]:
             return ["Looking up datasets", "Searching SP2020"]
         return ["Writing the answer"]
     if any(name in update for name in _SOURCE_NODES):
+        if any((update.get(name) or {}).get("series_selections") for name in _SOURCE_NODES):
+            return ["Analyzing province data"]
+        return ["Writing the answer"]
+    if "analyze_data" in update:
         return ["Writing the answer"]
     return []
 

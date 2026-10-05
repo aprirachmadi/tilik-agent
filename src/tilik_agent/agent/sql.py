@@ -255,9 +255,9 @@ def get_observations(
             """,
             (dataset_id, member_ids),
         ).fetchall()
-        if len(selected_members) != len(set(member_ids)) or len(
-            {axis_id for axis_id, _ in selected_members}
-        ) != len(selected_members):
+        if len(selected_members) != len(set(member_ids)) or len({axis_id for axis_id, _ in selected_members}) != len(
+            selected_members
+        ):
             return {"error": "Invalid members or two members from one axis"}
 
         rows = conn.execute(
@@ -318,9 +318,42 @@ def get_observations(
     }
 
 
+@tool(response_format="content_and_artifact")
+def select_series(
+    dataset_id: int, measure_id: int, period_ids: list[int], member_ids: list[int]
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Validate a complete province series for statistical analysis.
+
+    Use exact IDs from describe_dataset. Include every requested year (through
+    the latest available year for 'since' questions). Pin exactly one member
+    of every non-geography axis, such as Jumlah and March; leave the province
+    axis unpinned. Returns coverage and a selection ID, not numeric rows.
+    """
+    from tilik_agent.agent.statistics import create_selection
+
+    full = create_selection(dataset_id, measure_id, period_ids, member_ids)
+    if "error" in full:
+        return full, full
+    selection = full["selection"]
+    summary = {
+        "selection_id": selection["selection_id"],
+        "dataset_id": dataset_id,
+        "measure_id": measure_id,
+        "periods": selection["period_labels"],
+        "province_counts": {period: info["count"] for period, info in full["coverage"].items()},
+        "missing_province_codes": {
+            period: info["missing_from_selected_union"]
+            for period, info in full["coverage"].items()
+            if info["missing_from_selected_union"]
+        },
+    }
+    return summary, full
+
+
 SQL_SYSTEM_PROMPT = SystemMessage("""You gather published BPS observations.
 Find the relevant parsed datasets, inspect their measures, periods, and members,
-then call get_observations for every value needed by the question. Use the
+then call select_series for statistical analysis or get_observations for ordinary
+lookups. Never use get_observations for a full province panel. Use the
 metadata and exact member IDs returned by the tools. Do not average published
 percentages or combine totals with their component categories. If a tool
 returns incomplete or truncated data, do not pretend it is complete.
@@ -328,7 +361,7 @@ After the necessary tool calls, give only a short completion status. Do not
 write a user-facing report or repeat the observation values.""")
 
 
-SQL_TOOLS = [search_datasets, describe_dataset, get_observations]
+SQL_TOOLS = [search_datasets, describe_dataset, get_observations, select_series]
 
 
 def build_agent(chat_model: ChatOpenAI):
@@ -400,10 +433,17 @@ def _harvest_get_observations(data: dict[str, Any], ctx: dict[str, Any]) -> None
         )
 
 
+def _harvest_select_series(data: dict[str, Any], ctx: dict[str, Any]) -> None:
+    selection = data.get("selection")
+    if selection:
+        ctx.setdefault("selections", []).append({**selection, "step_id": ctx["step_id"]})
+
+
 TOOL_HANDLERS: dict[str, Any] = {
     "search_datasets": _harvest_search_datasets,
     "describe_dataset": _harvest_describe_dataset,
     "get_observations": _harvest_get_observations,
+    "select_series": _harvest_select_series,
 }
 
 
@@ -414,27 +454,39 @@ def _harvest_tool_message(message: Any, ctx: dict[str, Any]) -> None:
         return
     handler = TOOL_HANDLERS.get(message.name)
     if handler:
-        handler(data, ctx)
+        artifact = getattr(message, "artifact", None)
+        handler(artifact if message.name == "select_series" and isinstance(artifact, dict) else data, ctx)
 
 
-def _sql_step_once(step: PlanStep, question: str, dependency: str = "") -> dict[str, Any]:
+def _sql_step_once(
+    step: PlanStep, question: str, dependency: str = "", *, analysis: bool = False, time_scope: str = ""
+) -> dict[str, Any]:
     dependency_line = ""
     if dependency:
         dependency_line = (
-            "Evidence from dependencies (use it to select the next lookup, but verify values with tools): "
-            + dependency
+            "Evidence from dependencies (use it to select the next lookup, but verify values with tools): " + dependency
         )
     prompt = (
         f"Original question: {question}\n"
         f"Current planned lookup: {step.request}\n"
         f"{dependency_line}\n"
-        "Use only search_datasets, describe_dataset, and get_observations. Obtain all\n"
-        "observations needed for the requested answer. Keep all tool results available for the final "
+        f"Statistical analysis required: {analysis}. Required time scope: {time_scope}.\n"
+        + (
+            "Use search_datasets, describe_dataset, and select_series. "
+            "Select all needed province series with every required period; "
+            "pin every category and survey round. Do not fetch the panel "
+            "with get_observations.\n"
+            if analysis
+            else "Use search_datasets, describe_dataset, and get_observations. "
+            "Obtain all observations needed for the answer.\n"
+        )
+        + "Keep all tool results available for the final "
         "answer writer. Finish with only a brief status, not a report."
     )
     ctx: dict[str, Any] = {
         "step_id": step.id,
         "observations": [],
+        "selections": [],
         "details": {"searches": [], "datasets": {}},
         "errors": [],
     }
@@ -473,16 +525,19 @@ def _sql_step_once(step: PlanStep, question: str, dependency: str = "") -> dict[
     finally:
         var_child_runnable_config.reset(parent_config)
     observations: list[dict[str, Any]] = ctx["observations"]
+    selections: list[dict[str, Any]] = ctx["selections"]
     errors: list[str] = ctx["errors"]
-    if observations and errors:
+    if (observations or selections) and errors:
         return {
             "observations": observations,
+            "series_selections": selections,
             "source_details": ctx["details"],
             "sql_error": "",
             "sql_warnings": "; ".join(errors),
         }
     return {
         "observations": observations,
+        "series_selections": selections,
         "source_details": ctx["details"],
         "sql_error": "; ".join(errors),
         "sql_warnings": "",
@@ -497,6 +552,8 @@ def _parent_stream_writer() -> Any:
         return lambda _: None
 
 
-def _sql_step(step: PlanStep, question: str, dependency: str = "") -> dict[str, Any]:
+def _sql_step(
+    step: PlanStep, question: str, dependency: str = "", *, analysis: bool = False, time_scope: str = ""
+) -> dict[str, Any]:
     # Single pass: inner sql_agent already retries tool calls; no outer duplicate run.
-    return _sql_step_once(step, question, dependency)
+    return _sql_step_once(step, question, dependency, analysis=analysis, time_scope=time_scope)

@@ -14,6 +14,7 @@ from typing import TypeVar
 from sqlalchemy import delete, insert, select, tuple_
 from sqlalchemy.orm import Session
 
+from tilik_agent.agent.geography import province_code, province_names
 from tilik_agent.ingestion.contracts import ObservationDraft, ParseResult
 from tilik_agent.ingestion.models import (
     Dataset,
@@ -241,6 +242,24 @@ def _resolve_members(
         for dimension in draft.dimensions
     }
     code_by_dimension_id = {dimension.id: code for code, dimension in dimensions.items()}
+    known_provinces = province_names(
+        list(
+            session.execute(
+                select(Geography.bps_code, Geography.name).where(
+                    Geography.administrative_level == "province", Geography.geography_version == "source"
+                )
+            ).tuples()
+        )
+    )
+
+    def canonical(draft: object) -> str | None:
+        if draft.dimension_type != "geography":
+            return draft.canonical_code
+        if draft.canonical_code == "national":
+            return "national"
+        if PROVINCE_CODE.fullmatch(draft.member_source_code) and draft.member_source_code.endswith("0000"):
+            return draft.member_source_code
+        return province_code(draft.member_label, known_provinces)
 
     def _load() -> dict[tuple[str, str], DimensionMember]:
         return {
@@ -255,7 +274,7 @@ def _resolve_members(
         {
             "dimension_id": dimensions[key[0]].id,
             "source_code": key[1],
-            "canonical_code": draft.canonical_code,
+            "canonical_code": canonical(draft),
             "original_label": draft.member_label,
             "normalized_label": normalize_label(draft.member_label),
         }
@@ -268,7 +287,7 @@ def _resolve_members(
             continue
         member.original_label = draft.member_label
         member.normalized_label = normalize_label(draft.member_label)
-        member.canonical_code = draft.canonical_code
+        member.canonical_code = canonical(draft)
     if new_rows:
         session.execute(insert(DimensionMember), new_rows)
         members = _load()

@@ -448,7 +448,7 @@ def test_conversation_metric_builder_uses_all_sql_tools_and_optional_relevancy()
     built = conversation_metrics(config, judge, history_messages=6)
     assert list(built) == ["goal_accuracy", "tool_use", "conversation_completeness"]
     assert {tool.name for tool in built["tool_use"].available_tools} == {
-        "search_datasets", "describe_dataset", "get_observations"
+        "search_datasets", "describe_dataset", "get_observations", "select_series"
     }
     assert all(tool.description for tool in built["tool_use"].available_tools)
     config.turn_relevancy.enabled = True

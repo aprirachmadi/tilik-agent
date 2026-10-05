@@ -83,8 +83,34 @@ def _score_item(
 ) -> tuple[QuestionResult, list[ItemScore]]:
     _progress(f"[{item_id}] {question}")
     result, scores = score_question(question, judge)
+    if item_id in _ANALYSIS_FACTS:
+        scores.append(_analysis_facts_score(item_id, result))
     _progress(format_report([(item_id, scores)]))
     return result, scores
+
+
+_ANALYSIS_FACTS = {
+    "12": ("38", "0,565", "positif"),
+    "13": ("38", "0,572", "negatif"),
+    "14": ("2017", "2026", "0,531", "0,618", "34", "38", "papua", "batas"),
+    "15": ("34", "0,902", "poin persentase"),
+    "16": ("2017", "2020", "2021", "2025", "20/34", "14/38"),
+    "17": ("bali", "3,38", "residual"),
+    "18": ("38", "0,801", "sebab"),
+}
+
+
+def _analysis_facts_score(item_id: str, result: QuestionResult) -> ItemScore:
+    answer = (result.answer or "").casefold().replace(".", ",").replace("−", "-")
+    missing = [fact for fact in _ANALYSIS_FACTS[item_id] if fact not in answer]
+    if not result.answer_analysis_result_ids:
+        missing.append("verified analysis result")
+    return ItemScore(
+        "analysis_facts",
+        "passed" if not missing else "failed",
+        "" if not missing else "Missing: " + ", ".join(missing),
+        "CATEGORICAL",
+    )
 
 
 def build_judge() -> AgentJudgeLlm | None:

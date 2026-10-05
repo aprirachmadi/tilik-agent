@@ -1,6 +1,6 @@
 {
   "name": "demografi-sosial-questions",
-  "version": "2026-10-02",
+  "version": "2026-10-04",
   "items": [
     {
       "id": "1",
@@ -56,6 +56,46 @@
       "id": "11",
       "question": "Tampilkan grafik jumlah penduduk Indonesia per kelompok umur pada 2025 dan sebutkan kelompok umur terbesar.",
       "expected_response": "Kelompok umur terbesar pada 2025 adalah 0-4 tahun dengan 22.752,6 ribu jiwa, diikuti 25-29 tahun dengan 22.514,2 ribu jiwa, dari total 284.438,8 ribu jiwa (BPS, Jumlah Penduduk Menurut Kelompok Umur dan Jenis Kelamin)."
+    },
+    {
+      "id": "12",
+      "question": "Apakah provinsi dengan rata-rata lama sekolah lebih tinggi cenderung memiliki TPT lebih rendah pada 2025? Seberapa kuat hubungannya?",
+      "expected_response": "Tidak. Pada 38 provinsi, korelasi Pearson RLS dan TPT Agustus 2025 positif, r = +0,565 (Spearman 0,555). Regresi TPT terhadap RLS memiliki slope +0,656 poin persentase per tahun sekolah dan R² = 0,319. Hubungan ini bukan bukti sebab-akibat; urbanisasi dapat menjadi faktor perancu."
+    },
+    {
+      "id": "13",
+      "question": "Seberapa kuat hubungan rata-rata lama sekolah dan persentase penduduk miskin antarprovinsi pada 2025?",
+      "expected_response": "Pada 38 provinsi, korelasi Pearson RLS dan P0 Jumlah Maret 2025 adalah r = −0,572. Regresi P0 terhadap RLS memiliki slope −3,150 poin persentase per tahun sekolah dan R² = 0,327. Korelasi tidak membuktikan sebab-akibat."
+    },
+    {
+      "id": "14",
+      "question": "Apakah kesenjangan persentase penduduk miskin antarprovinsi menyempit sejak 2017?",
+      "expected_response": "CV P0 Jumlah Maret antarprovinsi (simpangan baku sampel dibagi rata-rata) pada 2017–2023: 0,531, 0,535, 0,544, 0,522, 0,502, 0,512, 0,514 (masing-masing 34 provinsi). Pada 2024–2026 panel tersedia 38 provinsi: 0,605, 0,617, 0,618; panel kode yang sama dengan 2017 tetap 34 provinsi dan memberi CV yang lebih rendah. Empat provinsi Papua baru masuk data 2024, dan batas Papua/Papua Barat dapat berubah sehingga panel 34 kode pun belum sepenuhnya sebanding."
+    },
+    {
+      "id": "15",
+      "question": "Apakah provinsi yang paling miskin pada 2017 mengalami penurunan kemiskinan paling besar hingga 2025?",
+      "expected_response": "Pada 34 provinsi dengan kedua tahun, korelasi P0 Maret 2017 dengan perubahan P0 dalam poin persentase hingga 2025 adalah r = −0,902; slope regresinya −0,271. Provinsi dengan P0 awal lebih tinggi cenderung mengalami penurunan lebih besar. Ini asosiasi, bukan bukti kausal."
+    },
+    {
+      "id": "16",
+      "question": "Apakah TPT Agustus biasanya lebih rendah dari TPT Februari di sebagian besar provinsi?",
+      "expected_response": "Tidak konsisten. Provinsi dengan TPT Agustus lebih rendah: 2017 11/34, 2018 7/34, 2019 6/34, 2020 1/34; sesudah 2020 menjadi 2021 20/34, 2022 19/34, 2023 20/34, 2024 20/38, 2025 14/38. Pola berubah setelah 2020."
+    },
+    {
+      "id": "17",
+      "question": "Provinsi mana yang TPT-nya paling menyimpang dari yang diperkirakan berdasarkan rata-rata lama sekolahnya pada 2025?",
+      "expected_response": "Dalam regresi TPT Agustus 2025 terhadap RLS 2025 pada 38 provinsi, Bali memiliki residual absolut terbesar: −3,38 poin persentase. Jawa Barat +2,30 dan Banten +1,98 berikutnya. Residual adalah TPT aktual dikurangi prediksi model; model memiliki R² = 0,319."
+    },
+    {
+      "id": "18",
+      "question": "Seberapa kuat hubungan akses sanitasi layak dan persentase penduduk miskin antarprovinsi pada 2025?",
+      "expected_response": "Pada 38 provinsi, korelasi Pearson akses sanitasi layak dan P0 Jumlah Maret 2025 adalah r = −0,801 (Spearman −0,616), hubungan negatif yang kuat tetapi bukan bukti sebab-akibat."
+    },
+    {
+      "id": "19",
+      "question": "Bagaimana tren pangsa pengeluaran makanan Indonesia 2007–2025, dan apakah sejalan dengan hukum Engel?",
+      "expected_response": "Pangsa pengeluaran makanan Indonesia tetap sekitar 42,55–46,70% pada 2007–2025, dari 43,85% pada 2007 menjadi 46,04% pada 2025; tidak menunjukkan penurunan berkelanjutan. Perbandingan nominal/riil dan perubahan metode survei perlu dicermati."
     }
   ]
 }

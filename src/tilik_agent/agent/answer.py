@@ -98,9 +98,7 @@ def validate_analysis(
             raise ValueError("Finding cites an unknown source ID")
         if finding.value is not None:
             values = {
-                Decimal(str(rows[i]["value"]))
-                for i in finding.observation_ids
-                if rows[i].get("value") is not None
+                Decimal(str(rows[i]["value"])) for i in finding.observation_ids if rows[i].get("value") is not None
             }
             if Decimal(str(finding.value)) not in values:
                 raise ValueError("Finding value disagrees with cited observations")
@@ -114,6 +112,8 @@ def validate_analysis(
 
 
 def chart_needed(state: State) -> Literal["yes", "no"]:
+    if state.get("analysis_results"):
+        return "no"
     rows = _answer_observation_rows(state)
     if not rows:
         return "no"
@@ -131,8 +131,8 @@ def build_chart(state: State) -> dict[str, Any]:
 Return a ChartSpec, not plotting code. Every point's value must match its
 observation_id. Prefer bars for category comparisons and lines for trends.
 Keep distinct units in distinct series; if units cannot be compared on one
-axis, chart only one metric. Question: {state['question']}
-Answer: {_clean_chart_markers(state['answer'])}
+axis, chart only one metric. Question: {state["question"]}
+Answer: {_clean_chart_markers(state["answer"])}
 Rows: {compact_json(evidence_rows(rows))}"""
     try:
         chart = model_json(ChartSpec, prompt)
@@ -154,9 +154,7 @@ def display_chart_spec(chart: dict[str, Any] | None) -> None:
     import plotly.express as px
 
     spec = ChartSpec.model_validate(chart)
-    frame = pd.DataFrame(
-        [{"label": point.label, "series": point.series, "value": point.value} for point in spec.data]
-    )
+    frame = pd.DataFrame([{"label": point.label, "series": point.series, "value": point.value} for point in spec.data])
     color = "series" if frame["series"].nunique() > 1 else None
     if spec.type == "bar":
         figure = px.bar(
@@ -189,6 +187,16 @@ def _answer_prompt(state: State) -> str:
         if direct
         else ""
     )
+    results = [
+        {key: value for key, value in item.items() if key != "input_observation_ids"}
+        for item in state.get("analysis_results", [])
+    ]
+    selections = [
+        {key: value for key, value in item.items() if key != "observation_ids"}
+        for item in state.get("series_selections", [])
+    ]
+    error_keys = ("plan_error", "retrieval_error", "sql_error", "sql_warnings", "analysis_error")
+    errors = {key: state.get(key) for key in error_keys}
     return f"""You are Tilik. Answer in the user's language using only the
 evidence below. Give the best supported answer, and clearly identify any
 requested part that the evidence cannot establish. Never invent missing values.
@@ -209,28 +217,79 @@ not request one, put the marker where it belongs. The marker requests
 placement; do not claim a chart exists until one is built.
 Write only in the user's language, except for cited names and quotations.
 Return an AnswerDraft with evidence IDs in its ID fields, not its text field.
-{direct_rule}{history_block(state.get('history'), 'Conversation so far')}Question: {state['question']}
-Plan: {compact_json(state.get('plan', {}))}
-Step status: {compact_json(state.get('step_status', {}))}
-Observations: {compact_json(evidence_rows(state.get('observations', [])))}
-Source details: {compact_json(evidence_source_details(state.get('source_details', {})))}
-Documents: {compact_json(state.get('documents', []))}
-Intermediate calculations: {compact_json(state.get('intermediate_analysis', {}))}
-Errors: {compact_json({k: state.get(k) for k in ('plan_error', 'retrieval_error', 'sql_error', 'sql_warnings')})}"""
+{direct_rule}{history_block(state.get("history"), "Conversation so far")}Question: {state["question"]}
+Plan: {compact_json(state.get("plan", {}))}
+Step status: {compact_json(state.get("step_status", {}))}
+Observations: {compact_json(evidence_rows(state.get("observations", [])))}
+Source details: {compact_json(evidence_source_details(state.get("source_details", {})))}
+Documents: {compact_json(state.get("documents", []))}
+Intermediate calculations: {compact_json(state.get("intermediate_analysis", {}))}
+Verified statistical results: {compact_json(results)}
+Statistical selections: {compact_json(selections)}
+For a statistical result, cite its result_id in analysis_result_ids. State its
+sample size, source table, survey round, exclusions and comparability notes.
+Use only the computed numbers; do not infer causality from correlation.
+Errors: {compact_json(errors)}"""
+
+
+def _analysis_numbers_supported(text: str, state: State) -> bool:
+    """Reject novel numerals in analysis prose; accept source-precision rounding."""
+    from tilik_agent.agent.schemas import AnalysisResult
+
+    def collect(value: Any) -> list[float]:
+        if isinstance(value, bool):
+            return []
+        if isinstance(value, int | float):
+            return [float(value)]
+        if isinstance(value, str):
+            return [float(value)] if re.fullmatch(r"\d{4}", value) else []
+        if isinstance(value, dict):
+            numbers = [number for key, part in value.items() for number in (collect(key) + collect(part))]
+            for key, part in value.items():
+                if key in {"excluded_from_common", "common_province_codes"} and isinstance(part, list):
+                    numbers.append(float(len(part)))
+                if key == "periods" and isinstance(part, dict):
+                    numbers.append(float(len(part)))
+            return numbers
+        if isinstance(value, list):
+            return [number for part in value for number in collect(part)]
+        return []
+
+    allowed = collect([AnalysisResult.model_validate(item).statistics for item in state.get("analysis_results", [])])
+    allowed += collect([item.get("coverage", {}) for item in state.get("series_selections", [])])
+    allowed += collect([item.get("period_labels", []) for item in state.get("series_selections", [])])
+    for token in re.findall(r"(?<![\w])[-−]?\d+(?:[.,]\d+)?", text):
+        normalized = token.replace("−", "-").replace(",", ".")
+        number = float(normalized)
+        decimals = len(normalized.split(".", 1)[1]) if "." in normalized else 0
+        tolerance = 0.5 * 10 ** (-decimals) + 1e-9
+        if not any(abs(number - candidate) <= tolerance for candidate in allowed):
+            return False
+    return True
 
 
 def write_answer(state: State) -> dict[str, Any]:
+    if state.get("analysis_error"):
+        return {"answer": state["analysis_error"], "answer_observation_ids": [], "answer_document_ids": []}
     try:
         answer = model_json(AnswerDraft, _answer_prompt(state))
         known_rows = set(observation_index(state))
         known_docs = set(document_index(state))
         if set(answer.observation_ids) - known_rows or set(answer.document_ids) - known_docs:
             raise ValueError("Answer cites unknown evidence IDs")
-        return {
+        results = {item["result_id"] for item in state.get("analysis_results", [])}
+        if results and (
+            set(answer.analysis_result_ids) != results or not _analysis_numbers_supported(answer.text, state)
+        ):
+            raise ValueError("Answer contains unsupported statistical numbers or missing result citations")
+        output = {
             "answer": answer.text,
             "answer_observation_ids": answer.observation_ids,
             "answer_document_ids": answer.document_ids,
         }
+        if results:
+            output["answer_analysis_result_ids"] = answer.analysis_result_ids
+        return output
     except (ValidationError, ValueError, APIError) as exc:
         truncated = any(row.get("truncated_batch") for row in state.get("observations", []))
         no_draft = isinstance(exc, ValueError) and str(exc) == "Model returned no AnswerDraft tool call"

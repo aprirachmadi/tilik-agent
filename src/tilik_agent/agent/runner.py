@@ -22,6 +22,10 @@ class QuestionResult:
     blocks: list[dict[str, str]] | None = None
     answer_observation_ids: list[int] = field(default_factory=list)
     answer_document_ids: list[str] = field(default_factory=list)
+    answer_analysis_result_ids: list[str] = field(default_factory=list)
+    analysis_results: list[dict[str, Any]] = field(default_factory=list)
+    series_selections: list[dict[str, Any]] = field(default_factory=list)
+    analysis_error: str | None = None
     step_status: dict[str, Any] = field(default_factory=dict)
     plan_error: str | None = None
     standalone_question: str | None = None
@@ -128,6 +132,23 @@ def cited_sources(state: State) -> list[dict[str, Any]]:
                 "title": dataset.get("title"),
             }
         )
+    for selection in state.get("series_selections") or []:
+        if not state.get("answer_analysis_result_ids"):
+            break
+        dataset_id = int(selection["dataset_id"])
+        if dataset_id in seen_datasets:
+            continue
+        seen_datasets.add(dataset_id)
+        dataset = (datasets.get(str(dataset_id)) or {}).get("dataset") or {}
+        sources.append(
+            {
+                "kind": "dataset",
+                "dataset_id": dataset_id,
+                "bps_table_id": dataset.get("bps_table_id"),
+                "tablesource": dataset.get("tablesource"),
+                "title": selection.get("dataset_title"),
+            }
+        )
     seen_documents: set[str] = set()
     for document_id in state.get("answer_document_ids") or []:
         key = str(document_id)
@@ -149,6 +170,10 @@ def question_result(state: State, *, trace_id: str | None = None) -> QuestionRes
         blocks=blocks,
         answer_observation_ids=state.get("answer_observation_ids") or [],
         answer_document_ids=state.get("answer_document_ids") or [],
+        answer_analysis_result_ids=state.get("answer_analysis_result_ids") or [],
+        analysis_results=state.get("analysis_results") or [],
+        series_selections=state.get("series_selections") or [],
+        analysis_error=state.get("analysis_error"),
         step_status=state.get("step_status") or {},
         plan_error=state.get("plan_error"),
         standalone_question=state.get("question"),

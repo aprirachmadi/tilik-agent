@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Literal
 
@@ -32,6 +33,12 @@ Never assume that a document search can provide a missing SQL value.
 Set WorkPlan.question to a standalone version of the latest user message. When
 recent conversation is present, resolve follow-ups such as "what about 2024?"
 into a full question with place, indicator, and period.
+Set requested_analysis for relationships/correlation, regression/residuals,
+province dispersion over time, convergence, and paired province comparisons.
+When requested_analysis is true, include a sql_lookup step and specify exact
+start_year/end_year or through_latest for 'since' questions. Preserve every
+explicit year and the original time meaning. The SQL agent selects series;
+do not put bulk province rows in the plan or request them from get_observations.
 Return steps: [] when the latest message needs no new BPS SQL or publication lookup
 (greetings, who are you, or confirming numbers already stated in the conversation).
 When steps is empty, requested_chart must be false.
@@ -41,6 +48,39 @@ When steps is empty, requested_chart must be false.
         try:
             plan = model_json(WorkPlan, prompt if attempt == 0 else prompt + f"\nPrevious invalid plan: {error}")
             plan = WorkPlan.model_validate(plan)
+            lowered = original_question.casefold()
+            analytic_cues = (
+                "seberapa kuat hubungan",
+                "cenderung memiliki",
+                "paling menyimpang",
+                "menyempit sejak",
+                "sebagian besar provinsi",
+                "paling miskin",
+                "konvergen",
+                "korelasi",
+                "regresi",
+            )
+            if any(cue in lowered for cue in analytic_cues):
+                if not plan.steps:
+                    raise ValueError("Analysis question needs a source lookup")
+                plan.requested_analysis = True
+            years = {int(value) for value in re.findall(r"(?<!\d)(?:19|20)\d{2}(?!\d)", original_question)}
+            if "sejak" in lowered and len(years) == 1 and plan.requested_analysis:
+                plan.start_year = next(iter(years))
+                plan.through_latest = True
+            elif plan.requested_analysis and years:
+                plan.start_year = min(years)
+                plan.end_year = max(years)
+            elif plan.requested_analysis and "biasanya" in lowered:
+                plan.through_latest = True
+            if plan.requested_analysis and not any(step.action == "sql_lookup" for step in plan.steps):
+                raise ValueError("Analysis requires a SQL lookup step")
+            if years - {int(value) for value in re.findall(r"(?<!\d)(?:19|20)\d{2}(?!\d)", plan.question)}:
+                raise ValueError("Standalone question lost an explicit user year")
+            if "sejak" in original_question.casefold() and years and plan.requested_analysis:
+                start = min(years)
+                if plan.start_year != start or (len(years) == 1 and not plan.through_latest):
+                    raise ValueError(f"Analysis must preserve since {start} through latest available")
             standalone = plan.question.strip() or original_question
             if not plan.steps:
                 return {
@@ -97,6 +137,7 @@ cite observation IDs. Request: {step.request}\nRows: {compact_json(evidence_rows
 def _merge_result(target: dict[str, Any], result: dict[str, Any]) -> None:
     target["documents"].extend(result.get("documents", []))
     target["observations"].extend(result.get("observations", []))
+    target["series_selections"].extend(result.get("series_selections", []))
     source = result.get("source_details", {})
     target["source_details"]["searches"].extend(source.get("searches", []))
     target["source_details"]["datasets"].update(source.get("datasets", {}))
@@ -119,6 +160,7 @@ def _execute_plan(state: State) -> dict[str, Any]:
     aggregate: dict[str, Any] = {
         "documents": [],
         "observations": [],
+        "series_selections": [],
         "source_details": {"searches": [], "datasets": {}},
         "step_status": {},
     }
@@ -146,7 +188,13 @@ def _execute_plan(state: State) -> dict[str, Any]:
                 }
             )
             if step.action == "sql_lookup":
-                return step.id, _sql_step(step, state["question"], context if step.depends_on else "")
+                dependency = context if step.depends_on else ""
+                if plan.requested_analysis:
+                    scope = (
+                        f"start_year={plan.start_year}, end_year={plan.end_year}, through_latest={plan.through_latest}"
+                    )
+                    return step.id, _sql_step(step, state["question"], dependency, analysis=True, time_scope=scope)
+                return step.id, _sql_step(step, state["question"], dependency)
             if step.action == "retrieve_document":
                 return step.id, _retrieve_step(step, state["question"], context if step.depends_on else "")
             return step.id, _calculate_step(step, aggregate)
@@ -164,11 +212,14 @@ def _execute_plan(state: State) -> dict[str, Any]:
             step = pending.pop(step_id)
             evidence_count = (
                 len(result.get("observations", []))
+                + len(result.get("series_selections", []))
                 + len(result.get("documents", []))
                 + len(result.get("analysis", {}).get("findings", []))
             )
-            blocking = result.get("error") or result.get("retrieval_error") or (
-                result.get("sql_error") if not evidence_count else ""
+            blocking = (
+                result.get("error")
+                or result.get("retrieval_error")
+                or (result.get("sql_error") if not evidence_count else "")
             )
             warning = result.get("sql_warnings") or ""
             incomplete_rows = any(row.get("truncated_batch") for row in result.get("observations", []))

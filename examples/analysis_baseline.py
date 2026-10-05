@@ -1,8 +1,7 @@
-"""Run the hardest issue-05 analysis question through the current pipeline.
+"""Run the issue-05 time-scope regression through the current pipeline.
 
 Run ``poetry run python examples/analysis_baseline.py``. It answers benchmark item 14 once, without
-judging, and prints the plan, step status, and fetched rows next to the probe result,
-so the gap the analysis node must close is visible.
+judging, and prints the plan, selected series, computed result, and answer.
 """
 
 from __future__ import annotations
@@ -30,6 +29,8 @@ def main() -> None:
     result = question_result(state)
 
     rows = state.get("observations") or []
+    selections = state.get("series_selections") or []
+    analysis = state.get("analysis_results") or []
     status, comment = pipeline_status_label(result.step_status, result.plan_error)
     print(f"\n=== plan ===\n{json.dumps(state.get('plan', {}), ensure_ascii=False, indent=2)}")
     print(f"\n=== step status ===\n{json.dumps(result.step_status, ensure_ascii=False, indent=2)}")
@@ -37,7 +38,15 @@ def main() -> None:
     print(f"observations fetched: {len(rows)} (truncated batch: {any(row.get('truncated_batch') for row in rows)})")
     print(f"datasets: {sorted({row.get('dataset_id') for row in rows})}")
     print(f"periods: {sorted({str(row.get('period')) for row in rows})}")
-    for key in ("sql_error", "sql_warnings", "retrieval_error", "plan_error"):
+    selection_summaries = [
+        {key: value for key, value in item.items() if key != "observation_ids"} for item in selections
+    ]
+    result_summaries = [
+        {key: value for key, value in item.items() if key != "input_observation_ids"} for item in analysis
+    ]
+    print(f"\n=== selections ===\n{json.dumps(selection_summaries, ensure_ascii=False, indent=2)}")
+    print(f"\n=== analysis ===\n{json.dumps(result_summaries, ensure_ascii=False, indent=2)}")
+    for key in ("sql_error", "sql_warnings", "retrieval_error", "plan_error", "analysis_error"):
         if state.get(key):
             print(f"{key}: {state[key]}")
     print(f"\n=== answer ===\n{result.answer}")
