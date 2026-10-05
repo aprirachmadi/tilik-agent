@@ -89,6 +89,12 @@ def validate_analysis(
     raw_rows: list[dict[str, Any]],
     raw_docs: list[dict[str, Any]],
 ) -> Analysis:
+    """Legacy check for model-proposed findings and basic calculations.
+
+    The current agent graph does not call this function. Statistical operations
+    use ``statistics.compute`` instead; this does not verify final answer prose.
+    Keep this only if a structured ordinary-arithmetic step is reintroduced.
+    """
     rows = {int(row["observation_id"]): row for row in raw_rows}
     docs = {str(doc["id"]): doc for doc in raw_docs}
     for finding in proposed.findings:
