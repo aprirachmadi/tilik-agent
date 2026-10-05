@@ -81,6 +81,70 @@ def test_correlation_joins_by_code_and_reports_sample_size(monkeypatch: pytest.M
     assert math.isclose(result.statistics["pearson_r"], 1.0)
 
 
+def test_ols_matches_hand_calculated_reference(monkeypatch: pytest.MonkeyPatch) -> None:
+    panels = {
+        "x": {"2025": {"11": (1, 1.0, "A"), "12": (2, 2.0, "B"), "13": (3, 3.0, "C")}},
+        "y": {"2025": {"13": (4, 6.0, "C"), "11": (5, 2.0, "A"), "12": (6, 3.0, "B")}},
+    }
+    monkeypatch.setattr("tilik_agent.agent.statistics.load_series", lambda selection: panels[selection.selection_id])
+    result = compute(
+        AnalysisRequest(operation="ols", selection_ids=["x", "y"], top_k=1),
+        [_selection("x", ["2025"]), _selection("y", ["2025"])],
+    )
+    assert result.statistics["n"] == 3
+    assert result.statistics["slope"] == pytest.approx(2.0)
+    assert result.statistics["intercept"] == pytest.approx(-1 / 3)
+    assert result.statistics["r_squared"] == pytest.approx(12 / 13)
+    assert result.statistics["pearson_r"] == pytest.approx(math.sqrt(12 / 13))
+    assert result.statistics["spearman_rho"] == pytest.approx(1.0)
+    assert result.statistics["top_residuals"] == [
+        {"province_code": "12", "province": "B", "residual": pytest.approx(-2 / 3)}
+    ]
+
+
+def test_convergence_matches_hand_calculated_reference(monkeypatch: pytest.MonkeyPatch) -> None:
+    panel = {
+        "2017": {"11": (1, 10.0, "A"), "12": (2, 20.0, "B"), "13": (3, 30.0, "C")},
+        "2025": {"13": (4, 23.0, "C"), "11": (5, 9.0, "A"), "12": (6, 16.0, "B")},
+    }
+    monkeypatch.setattr("tilik_agent.agent.statistics.load_series", lambda _: panel)
+    result = compute(
+        AnalysisRequest(operation="convergence", selection_ids=["s"]),
+        [_selection("s", ["2017", "2025"])],
+    )
+    assert result.statistics["periods"] == ["2017", "2025"]
+    assert result.statistics["n"] == 3
+    assert result.statistics["slope"] == pytest.approx(-0.3)
+    assert result.statistics["intercept"] == pytest.approx(2.0)
+    assert result.statistics["r"] == pytest.approx(-1.0)
+    assert result.statistics["r_squared"] == pytest.approx(1.0)
+    assert result.statistics["change_unit"] == "percentage points"
+
+
+def test_paired_compare_matches_hand_calculated_reference(monkeypatch: pytest.MonkeyPatch) -> None:
+    panels = {
+        "first": {
+            "2024": {"11": (1, 3.0, "A"), "12": (2, 4.0, "B"), "13": (3, 5.0, "C")},
+            "2025": {"11": (4, 6.0, "A"), "12": (5, 7.0, "B"), "13": (6, 8.0, "C")},
+        },
+        "second": {
+            "2024": {"13": (7, 5.0, "C"), "11": (8, 4.0, "A"), "12": (9, 2.0, "B")},
+            "2025": {"13": (10, 10.0, "C"), "11": (11, 5.0, "A"), "12": (12, 9.0, "B")},
+        },
+    }
+    monkeypatch.setattr("tilik_agent.agent.statistics.load_series", lambda selection: panels[selection.selection_id])
+    result = compute(
+        AnalysisRequest(operation="paired_compare", selection_ids=["first", "second"]),
+        [_selection("first", ["2024", "2025"]), _selection("second", ["2024", "2025"])],
+    )
+    assert result.statistics["periods"]["2024"]["n"] == 3
+    assert result.statistics["periods"]["2024"]["first_lower"] == 1
+    assert result.statistics["periods"]["2024"]["mean_difference"] == pytest.approx(1 / 3)
+    assert result.statistics["periods"]["2025"]["n"] == 3
+    assert result.statistics["periods"]["2025"]["first_lower"] == 2
+    assert result.statistics["periods"]["2025"]["mean_difference"] == pytest.approx(-1.0)
+
+
 def test_interpreter_rejects_lost_explicit_year(monkeypatch: pytest.MonkeyPatch) -> None:
     bad = RequestIntent.model_validate({
         "question": "Apakah kesenjangan menyempit pada 201?",
