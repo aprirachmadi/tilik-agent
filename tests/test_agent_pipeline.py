@@ -591,6 +591,26 @@ def test_write_answer_rejects_an_unknown_evidence_id(monkeypatch: pytest.MonkeyP
     assert "unknown evidence" in result["answer"]
 
 
+def test_statistical_answer_accepts_derived_text_and_list_numbering(monkeypatch: pytest.MonkeyPatch) -> None:
+    draft = SimpleNamespace(
+        text="1. CV turun.\n2. Selisih simpangan baku sekitar 1,83 poin.",
+        observation_ids=[],
+        document_ids=[],
+        analysis_result_ids=["res_1"],
+    )
+    monkeypatch.setattr("tilik_agent.agent.answer.model_json", lambda schema, prompt: draft)
+    result = write_answer({"question": "Apakah kesenjangan menyempit?", "analysis_results": [{"result_id": "res_1"}]})
+    assert result["answer"] == draft.text
+    assert result["answer_analysis_result_ids"] == ["res_1"]
+
+
+def test_statistical_answer_still_requires_result_citation(monkeypatch: pytest.MonkeyPatch) -> None:
+    draft = SimpleNamespace(text="CV turun.", observation_ids=[], document_ids=[], analysis_result_ids=[])
+    monkeypatch.setattr("tilik_agent.agent.answer.model_json", lambda schema, prompt: draft)
+    result = write_answer({"question": "Apakah kesenjangan menyempit?", "analysis_results": [{"result_id": "res_1"}]})
+    assert "missing or unknown analysis result IDs" in result["answer"]
+
+
 def test_write_answer_explains_truncated_evidence_after_model_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     def fail(schema: Any, prompt: str) -> Any:
         raise ValueError("Model returned no AnswerDraft tool call")

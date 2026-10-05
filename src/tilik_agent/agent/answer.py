@@ -232,42 +232,6 @@ Use only the computed numbers; do not infer causality from correlation.
 Errors: {compact_json(errors)}"""
 
 
-def _analysis_numbers_supported(text: str, state: State) -> bool:
-    """Reject novel numerals in analysis prose; accept source-precision rounding."""
-    from tilik_agent.agent.schemas import AnalysisResult
-
-    def collect(value: Any) -> list[float]:
-        if isinstance(value, bool):
-            return []
-        if isinstance(value, int | float):
-            return [float(value)]
-        if isinstance(value, str):
-            return [float(value)] if re.fullmatch(r"\d{4}", value) else []
-        if isinstance(value, dict):
-            numbers = [number for key, part in value.items() for number in (collect(key) + collect(part))]
-            for key, part in value.items():
-                if key in {"excluded_from_common", "common_province_codes"} and isinstance(part, list):
-                    numbers.append(float(len(part)))
-                if key == "periods" and isinstance(part, dict):
-                    numbers.append(float(len(part)))
-            return numbers
-        if isinstance(value, list):
-            return [number for part in value for number in collect(part)]
-        return []
-
-    allowed = collect([AnalysisResult.model_validate(item).statistics for item in state.get("analysis_results", [])])
-    allowed += collect([item.get("coverage", {}) for item in state.get("series_selections", [])])
-    allowed += collect([item.get("period_labels", []) for item in state.get("series_selections", [])])
-    for token in re.findall(r"(?<![\w])[-−]?\d+(?:[.,]\d+)?", text):
-        normalized = token.replace("−", "-").replace(",", ".")
-        number = float(normalized)
-        decimals = len(normalized.split(".", 1)[1]) if "." in normalized else 0
-        tolerance = 0.5 * 10 ** (-decimals) + 1e-9
-        if not any(abs(number - candidate) <= tolerance for candidate in allowed):
-            return False
-    return True
-
-
 def write_answer(state: State) -> dict[str, Any]:
     if state.get("analysis_error"):
         return {"answer": state["analysis_error"], "answer_observation_ids": [], "answer_document_ids": []}
@@ -278,10 +242,8 @@ def write_answer(state: State) -> dict[str, Any]:
         if set(answer.observation_ids) - known_rows or set(answer.document_ids) - known_docs:
             raise ValueError("Answer cites unknown evidence IDs")
         results = {item["result_id"] for item in state.get("analysis_results", [])}
-        if results and (
-            set(answer.analysis_result_ids) != results or not _analysis_numbers_supported(answer.text, state)
-        ):
-            raise ValueError("Answer contains unsupported statistical numbers or missing result citations")
+        if results and set(answer.analysis_result_ids) != results:
+            raise ValueError("Answer cites missing or unknown analysis result IDs")
         output = {
             "answer": answer.text,
             "answer_observation_ids": answer.observation_ids,
