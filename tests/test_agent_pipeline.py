@@ -12,9 +12,25 @@ from langgraph.errors import GraphRecursionError
 from langgraph.graph import END, START, MessagesState, StateGraph
 from pydantic import ValidationError
 
-from tilik_agent.agent.answer import _check_calculation, build_chart, chart_needed, validate_analysis, write_answer
+from tilik_agent.agent.answer import (
+    _answer_prompt,
+    _check_calculation,
+    build_chart,
+    chart_needed,
+    validate_analysis,
+    write_answer,
+)
 from tilik_agent.agent.graph import compile_graph
-from tilik_agent.agent.schemas import Analysis, Calculation, ChartPoint, ChartSpec, Finding, PlanStep, RequestIntent
+from tilik_agent.agent.schemas import (
+    Analysis,
+    AnswerDraft,
+    Calculation,
+    ChartPoint,
+    ChartSpec,
+    Finding,
+    PlanStep,
+    RequestIntent,
+)
 from tilik_agent.agent.sql import (
     _harvest_describe_dataset,
     _harvest_get_observations,
@@ -496,19 +512,46 @@ def test_statistical_answer_accepts_derived_text_and_list_numbering(monkeypatch:
         text="1. CV turun.\n2. Selisih simpangan baku sekitar 1,83 poin.",
         observation_ids=[],
         document_ids=[],
-        analysis_result_ids=["res_1"],
     )
     monkeypatch.setattr("tilik_agent.agent.answer.model_json", lambda schema, prompt: draft)
-    result = write_answer({"question": "Apakah kesenjangan menyempit?", "analysis_results": [{"result_id": "res_1"}]})
+    result = write_answer(
+        {
+            "question": "Apakah kesenjangan menyempit?",
+            "analysis_results": [{"result_id": "res_1", "selection_ids": ["sel_1"]}],
+        }
+    )
     assert result["answer"] == draft.text
-    assert result["answer_analysis_result_ids"] == ["res_1"]
+    assert result["answer_analysis_selection_ids"] == ["sel_1"]
 
 
-def test_statistical_answer_still_requires_result_citation(monkeypatch: pytest.MonkeyPatch) -> None:
-    draft = SimpleNamespace(text="CV turun.", observation_ids=[], document_ids=[], analysis_result_ids=[])
-    monkeypatch.setattr("tilik_agent.agent.answer.model_json", lambda schema, prompt: draft)
-    result = write_answer({"question": "Apakah kesenjangan menyempit?", "analysis_results": [{"result_id": "res_1"}]})
-    assert "missing or unknown analysis result IDs" in result["answer"]
+def test_statistical_prompt_hides_internal_analysis_ids() -> None:
+    assert "analysis_result_ids" not in AnswerDraft.model_fields
+    prompt = _answer_prompt(
+        {
+            "question": "Apakah kesenjangan menyempit?",
+            "analysis_results": [
+                {
+                    "result_id": "res_1",
+                    "operation": "dispersion",
+                    "selection_ids": ["sel_1"],
+                    "input_observation_ids": [123],
+                    "statistics": {"cv": 0.5},
+                }
+            ],
+            "series_selections": [
+                {
+                    "selection_id": "sel_1",
+                    "dataset_id": 7,
+                    "dataset_title": "P0 by province",
+                    "observation_ids": [123],
+                }
+            ],
+        }
+    )
+    assert "res_1" not in prompt
+    assert "sel_1" not in prompt
+    assert '"cv": 0.5' in prompt
+    assert "P0 by province" in prompt
 
 
 def test_write_answer_explains_truncated_evidence_after_model_failure(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -22,7 +22,6 @@ class QuestionResult:
     blocks: list[dict[str, str]] | None = None
     answer_observation_ids: list[int] = field(default_factory=list)
     answer_document_ids: list[str] = field(default_factory=list)
-    answer_analysis_result_ids: list[str] = field(default_factory=list)
     analysis_results: list[dict[str, Any]] = field(default_factory=list)
     series_selections: list[dict[str, Any]] = field(default_factory=list)
     analysis_error: str | None = None
@@ -132,9 +131,10 @@ def cited_sources(state: State) -> list[dict[str, Any]]:
                 "title": dataset.get("title"),
             }
         )
+    cited_selections = set(state.get("answer_analysis_selection_ids") or [])
     for selection in state.get("series_selections") or []:
-        if not state.get("answer_analysis_result_ids"):
-            break
+        if selection["selection_id"] not in cited_selections:
+            continue
         dataset_id = int(selection["dataset_id"])
         if dataset_id in seen_datasets:
             continue
@@ -170,7 +170,6 @@ def question_result(state: State, *, trace_id: str | None = None) -> QuestionRes
         blocks=blocks,
         answer_observation_ids=state.get("answer_observation_ids") or [],
         answer_document_ids=state.get("answer_document_ids") or [],
-        answer_analysis_result_ids=state.get("answer_analysis_result_ids") or [],
         analysis_results=state.get("analysis_results") or [],
         series_selections=state.get("series_selections") or [],
         analysis_error=state.get("analysis_error"),

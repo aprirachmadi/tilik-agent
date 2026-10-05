@@ -296,6 +296,26 @@ def test_cited_sources_use_titles_for_cited_ids() -> None:
     assert question_result({}).trace_id is None
 
 
+def test_statistical_source_chip_uses_validated_selection_without_model_result_id() -> None:
+    state: State = {
+        "answer_analysis_selection_ids": ["sel_used"],
+        "series_selections": [
+            {"selection_id": "sel_used", "dataset_id": 7, "dataset_title": "P0 by province"},
+            {"selection_id": "sel_unused", "dataset_id": 8, "dataset_title": "Other table"},
+        ],
+        "source_details": {"datasets": {"7": {"dataset": {"bps_table_id": "bps-7", "tablesource": "1"}}}},
+    }
+    assert cited_sources(state) == [
+        {
+            "kind": "dataset",
+            "dataset_id": 7,
+            "bps_table_id": "bps-7",
+            "tablesource": "1",
+            "title": "P0 by province",
+        }
+    ]
+
+
 def test_questions_persists_chart_sources_and_lists_the_thread(
     monkeypatch: pytest.MonkeyPatch, chat_db: Session
 ) -> None:
@@ -368,14 +388,14 @@ def test_questions_persists_chart_sources_and_lists_the_thread(
 
 
 @pytest.mark.parametrize("path", ["/questions", "/questions/stream"])
-def test_placed_chart_round_trips(
-    path: str, monkeypatch: pytest.MonkeyPatch, chat_db: Session
-) -> None:
+def test_placed_chart_round_trips(path: str, monkeypatch: pytest.MonkeyPatch, chat_db: Session) -> None:
     monkeypatch.setattr("tilik_agent.agent.runner.compile_graph", lambda: _PlacedChartGraph())
     response = TestClient(app).post(path, json={"question": "grafik"})
     assert response.status_code == 200
-    body = response.json() if path == "/questions" else next(
-        payload for event, payload in _events(response.text) if event == "result"
+    body = (
+        response.json()
+        if path == "/questions"
+        else next(payload for event, payload in _events(response.text) if event == "result")
     )
     assert body["answer"] == "Intro.\n\nInterpretation."
     assert body["blocks"] == [

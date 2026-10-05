@@ -108,7 +108,6 @@ class AnswerDraft(BaseModel):
     text: str
     observation_ids: list[int] = Field(default_factory=list)
     document_ids: list[str] = Field(default_factory=list)
-    analysis_result_ids: list[str] = Field(default_factory=list)
 
 
 ChatRole = Literal["user", "assistant"]
@@ -144,4 +143,4 @@ class State(TypedDict, total=False):
     answer: str
     answer_observation_ids: list[int]
     answer_document_ids: list[str]
-    answer_analysis_result_ids: list[str]
+    answer_analysis_selection_ids: list[str]

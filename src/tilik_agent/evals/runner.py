@@ -103,7 +103,7 @@ _ANALYSIS_FACTS = {
 def _analysis_facts_score(item_id: str, result: QuestionResult) -> ItemScore:
     answer = (result.answer or "").casefold().replace(".", ",").replace("−", "-")
     missing = [fact for fact in _ANALYSIS_FACTS[item_id] if fact not in answer]
-    if not result.answer_analysis_result_ids:
+    if not result.analysis_results:
         missing.append("verified analysis result")
     return ItemScore(
         "analysis_facts",

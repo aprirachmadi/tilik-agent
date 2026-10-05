@@ -188,11 +188,19 @@ def _answer_prompt(state: State) -> str:
         else ""
     )
     results = [
-        {key: value for key, value in item.items() if key != "input_observation_ids"}
+        {
+            key: value
+            for key, value in item.items()
+            if key not in {"result_id", "selection_ids", "input_observation_ids"}
+        }
         for item in state.get("analysis_results", [])
     ]
     selections = [
-        {key: value for key, value in item.items() if key != "observation_ids"}
+        {
+            key: value
+            for key, value in item.items()
+            if key not in {"selection_id", "observation_ids", "dataset_id", "measure_id", "period_ids", "member_ids"}
+        }
         for item in state.get("series_selections", [])
     ]
     error_keys = ("plan_error", "retrieval_error", "sql_error", "sql_warnings", "analysis_error")
@@ -226,8 +234,8 @@ Documents: {compact_json(state.get("documents", []))}
 Intermediate calculations: {compact_json(state.get("intermediate_analysis", {}))}
 Verified statistical results: {compact_json(results)}
 Statistical selections: {compact_json(selections)}
-For a statistical result, cite its result_id in analysis_result_ids. State its
-sample size, source table, survey round, exclusions and comparability notes.
+For a statistical result, state its sample size, source table, survey round,
+exclusions and comparability notes.
 Use only the computed numbers; do not infer causality from correlation.
 Errors: {compact_json(errors)}"""
 
@@ -241,16 +249,15 @@ def write_answer(state: State) -> dict[str, Any]:
         known_docs = set(document_index(state))
         if set(answer.observation_ids) - known_rows or set(answer.document_ids) - known_docs:
             raise ValueError("Answer cites unknown evidence IDs")
-        results = {item["result_id"] for item in state.get("analysis_results", [])}
-        if results and set(answer.analysis_result_ids) != results:
-            raise ValueError("Answer cites missing or unknown analysis result IDs")
         output = {
             "answer": answer.text,
             "answer_observation_ids": answer.observation_ids,
             "answer_document_ids": answer.document_ids,
         }
-        if results:
-            output["answer_analysis_result_ids"] = answer.analysis_result_ids
+        if state.get("analysis_results"):
+            output["answer_analysis_selection_ids"] = sorted(
+                {selection_id for item in state["analysis_results"] for selection_id in item["selection_ids"]}
+            )
         return output
     except (ValidationError, ValueError, APIError) as exc:
         truncated = any(row.get("truncated_batch") for row in state.get("observations", []))
