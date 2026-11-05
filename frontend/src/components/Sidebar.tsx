@@ -1,15 +1,9 @@
-import { Search, Plus, X } from "lucide-react";
+import { Plus, Search, X } from "lucide-react";
 import { useState } from "react";
 import type { ConversationSummary } from "../api/types";
 import { Logo } from "./Logo";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const updatedFormat = new Intl.DateTimeFormat("id-ID", {
-  day: "numeric",
-  month: "short",
-  hour: "2-digit",
-  minute: "2-digit",
-});
 
 type SidebarProps = {
   conversations: ConversationSummary[];
@@ -73,25 +67,22 @@ export function Sidebar({
       <button
         type="button"
         aria-label="Tutup riwayat"
-        className={`fixed inset-0 z-30 bg-ink/30 transition lg:hidden ${open ? "opacity-100" : "pointer-events-none opacity-0"}`}
+        className={`fixed inset-0 z-30 bg-ink/20 backdrop-blur-[2px] transition lg:hidden ${open ? "opacity-100" : "pointer-events-none opacity-0"}`}
         onClick={onClose}
       />
       <aside
-        className={`fixed inset-y-0 left-0 z-40 flex w-[280px] flex-col border-r border-line bg-elevated transition-transform duration-200 lg:static lg:translate-x-0 ${
+        className={`fixed inset-y-0 left-0 z-40 flex w-[272px] flex-col border-r border-line bg-subtle transition-transform duration-200 ease-out lg:static lg:translate-x-0 ${
           open ? "translate-x-0" : "-translate-x-full"
         }`}
       >
-        <div className="flex items-center justify-between gap-2 px-3 py-3">
-          <div className="flex min-w-0 items-center gap-3">
-            <Logo size={36} />
-            <div className="min-w-0">
-              <p className="reading text-base leading-5 font-medium">Tilik</p>
-              <p className="text-sm text-ink-muted">Data BPS</p>
-            </div>
-          </div>
+        <div className="flex h-14 items-center justify-between gap-2 px-4">
+          <button type="button" onClick={onNew} className="flex items-center gap-2.5 rounded-lg" aria-label="Tilik, beranda">
+            <Logo size={26} />
+            <span className="text-[1.0625rem] font-semibold tracking-[-0.02em]">tilik</span>
+          </button>
           <button
             type="button"
-            className="flex size-11 items-center justify-center rounded-lg text-ink-mid hover:bg-canvas lg:hidden"
+            className="-mr-2 flex size-10 items-center justify-center rounded-lg text-ink-mid hover:bg-hover lg:hidden"
             aria-label="Tutup panel riwayat"
             onClick={onClose}
           >
@@ -99,53 +90,52 @@ export function Sidebar({
           </button>
         </div>
 
-        <div className="px-3">
+        <div className="space-y-2 px-3 pt-1">
           <button
             type="button"
             onClick={onNew}
-            className="flex min-h-11 w-full items-center justify-center gap-2 rounded-lg border border-line bg-canvas px-3 text-sm font-medium text-ink hover:bg-user"
+            className="flex min-h-10 w-full items-center gap-2 rounded-full bg-ink px-4 text-sm font-medium text-canvas transition hover:bg-ink-mid"
           >
-            <Plus size={16} />
+            <Plus size={16} strokeWidth={2.25} />
             Pertanyaan baru
           </button>
+          {conversations.length > 0 ? (
+            <div className="relative">
+              <Search size={15} aria-hidden="true" className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-ink-muted" />
+              <input
+                type="search"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                aria-label="Cari riwayat pertanyaan"
+                placeholder="Cari riwayat"
+                className="min-h-10 w-full rounded-full border border-transparent bg-transparent pr-3 pl-9 text-sm text-ink placeholder:text-ink-muted hover:bg-hover focus:border-line-strong focus:bg-canvas"
+              />
+            </div>
+          ) : null}
         </div>
 
-        {conversations.length > 0 ? (
-          <div className="relative mt-3 px-3">
-            <Search size={17} aria-hidden="true" className="pointer-events-none absolute top-3.5 left-6 text-ink-muted" />
-            <input
-              type="search"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              aria-label="Cari riwayat pertanyaan"
-              placeholder="Cari riwayat"
-              className="min-h-11 w-full rounded-lg border border-line bg-canvas pr-3 pl-10 text-sm text-ink placeholder:text-ink-muted"
-            />
-          </div>
-        ) : null}
-
-        <nav className="mt-3 flex-1 overflow-y-auto px-3 pb-6" aria-label="Riwayat pertanyaan">
+        <nav className="mt-4 flex-1 overflow-y-auto px-3 pb-6" aria-label="Riwayat pertanyaan">
           {historyError ? (
-            <div className="mb-4 rounded-xl bg-clay-wash px-3 py-3 text-ink" role="alert">
-              <p className="text-sm leading-5">{historyError}</p>
+            <div className="mb-4 rounded-xl border border-line bg-canvas px-3 py-3" role="alert">
+              <p className="text-sm leading-5 text-ink">{historyError}</p>
               <button
                 type="button"
                 onClick={onRetryHistory}
-                className="mt-2 min-h-11 rounded-full bg-ink px-4 text-sm font-medium text-canvas"
+                className="mt-2 min-h-9 rounded-full border border-line-strong px-4 text-sm font-medium text-ink hover:bg-subtle"
               >
                 Coba lagi
               </button>
             </div>
           ) : null}
           {groups.length === 0 && !historyError ? (
-            <p className="px-2 pt-6 text-sm text-ink-muted">
-              {query ? "Tidak ada pertanyaan yang cocok." : "Belum ada pertanyaan."}
+            <p className="px-3 pt-2 text-sm leading-5 text-ink-muted">
+              {query ? "Tidak ada pertanyaan yang cocok." : "Pertanyaan Anda akan tersimpan di sini."}
             </p>
           ) : (
             groups.map((group) => (
               <div key={group.label} className="mb-5">
-                <p className="px-2 pb-2 text-sm text-ink-muted">{group.label}</p>
-                <ul className="space-y-0.5">
+                <p className="eyebrow px-3 pb-1.5">{group.label}</p>
+                <ul>
                   {group.items.map((conversation) => {
                     const selected = conversation.id === activeId;
                     const label = conversationLabel(conversation);
@@ -156,14 +146,11 @@ export function Sidebar({
                           title={label}
                           aria-current={selected ? "page" : undefined}
                           onClick={() => onSelect(conversation.id)}
-                          className={`w-full rounded-lg px-2.5 py-2 text-left text-sm leading-5 break-words ${
-                            selected ? "bg-user font-medium text-ink" : "text-ink-mid hover:bg-canvas hover:text-ink"
+                          className={`block w-full truncate rounded-lg px-3 py-2 text-left text-sm leading-5 transition ${
+                            selected ? "bg-canvas font-medium text-ink shadow-[0_0_0_1px_var(--color-line)]" : "text-ink-mid hover:bg-hover hover:text-ink"
                           }`}
                         >
-                          <span className="line-clamp-2">{label}</span>
-                          <span className="mt-0.5 block text-xs font-normal text-ink-muted">
-                            {updatedFormat.format(new Date(conversation.updated_at))}
-                          </span>
+                          {label}
                         </button>
                       </li>
                     );
@@ -173,6 +160,10 @@ export function Sidebar({
             ))
           )}
         </nav>
+
+        <p className="border-t border-line px-4 py-3 font-mono text-[0.6875rem] leading-4 text-ink-muted">
+          Sumber: BPS · BNPB · BMKG
+        </p>
       </aside>
     </>
   );

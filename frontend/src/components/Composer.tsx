@@ -1,32 +1,56 @@
-import { ArrowUp } from "lucide-react";
+import { ArrowUp, Square } from "lucide-react";
 import { useLayoutEffect, type RefObject } from "react";
+import type { SourceId } from "../suggestions";
+
+export type SourceChoice = "auto" | SourceId;
+
+const SOURCE_OPTIONS: { value: SourceChoice; label: string }[] = [
+  { value: "auto", label: "Otomatis" },
+  { value: "bps", label: "BPS" },
+  { value: "bnpb", label: "BNPB" },
+  { value: "bmkg", label: "BMKG" },
+];
 
 type ComposerProps = {
   value: string;
+  source: SourceChoice;
   disabled: boolean;
   streaming: boolean;
   fieldRef: RefObject<HTMLTextAreaElement | null>;
   onChange: (value: string) => void;
+  onSourceChange: (source: SourceChoice) => void;
   onSubmit: () => void;
   onStop: () => void;
 };
 
-export function Composer({ value, disabled, streaming, fieldRef, onChange, onSubmit, onStop }: ComposerProps) {
+export function Composer({
+  value,
+  source,
+  disabled,
+  streaming,
+  fieldRef,
+  onChange,
+  onSourceChange,
+  onSubmit,
+  onStop,
+}: ComposerProps) {
   useLayoutEffect(() => {
     const element = fieldRef.current;
     if (!element) {
       return;
     }
     element.style.height = "0px";
-    element.style.height = `${Math.min(element.scrollHeight, 160)}px`;
+    element.style.height = `${Math.min(element.scrollHeight, 200)}px`;
   }, [fieldRef, value]);
+
+  const canSend = !disabled && Boolean(value.trim());
 
   return (
     <form
-      className="rounded-2xl bg-elevated shadow-float ring-1 ring-line transition focus-within:ring-2 focus-within:ring-teal"
+      className="rounded-2xl border border-line-strong bg-canvas shadow-composer transition focus-within:border-ink"
       onSubmit={(event) => {
         event.preventDefault();
-        if (!disabled && value.trim()) {
+        if (canSend) {
           onSubmit();
         }
       }}
@@ -34,48 +58,70 @@ export function Composer({ value, disabled, streaming, fieldRef, onChange, onSub
       <label className="sr-only" htmlFor="question">
         Pertanyaan
       </label>
-      <div className="flex items-end gap-2 px-3 py-2">
-        <textarea
-          id="question"
-          ref={fieldRef}
-          rows={1}
-          value={value}
-          disabled={disabled}
-          placeholder="Tanyakan data statistik, bencana, cuaca, atau gempa"
-          aria-describedby="question-hint"
-          className="max-h-40 min-h-11 flex-1 resize-none bg-transparent px-1 py-2.5 text-base leading-6 text-ink caret-teal outline-none placeholder:text-ink-muted disabled:opacity-60"
-          onChange={(event) => onChange(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && !event.shiftKey) {
-              event.preventDefault();
-              if (!disabled && value.trim()) {
-                onSubmit();
-              }
+      <textarea
+        id="question"
+        ref={fieldRef}
+        rows={1}
+        value={value}
+        disabled={disabled}
+        placeholder="Tanyakan statistik, bencana, cuaca, atau gempa…"
+        className="block max-h-50 min-h-14 w-full resize-none bg-transparent px-4 pt-4 pb-2 text-base leading-6 text-ink caret-accent outline-none placeholder:text-ink-muted disabled:opacity-60"
+        onChange={(event) => onChange(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+            event.preventDefault();
+            if (canSend) {
+              onSubmit();
             }
-          }}
-        />
+          }
+        }}
+      />
+      <div className="flex items-center gap-3 px-2 pb-2">
+        <fieldset className="flex min-w-0 items-center gap-0.5 overflow-x-auto" disabled={streaming}>
+          <legend className="sr-only">Sumber data</legend>
+          {SOURCE_OPTIONS.map((option) => {
+            const selected = option.value === source;
+            return (
+              <label
+                key={option.value}
+                className={`flex min-h-8 cursor-pointer items-center rounded-full px-3 text-[0.8125rem] whitespace-nowrap transition has-focus-visible:outline-2 has-focus-visible:outline-ink ${
+                  selected ? "bg-ink font-medium text-canvas" : "text-ink-mid hover:bg-subtle hover:text-ink"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="source"
+                  value={option.value}
+                  checked={selected}
+                  onChange={() => onSourceChange(option.value)}
+                  className="sr-only"
+                />
+                {option.label}
+              </label>
+            );
+          })}
+        </fieldset>
+        <span className="ml-auto hidden font-mono text-[0.6875rem] text-ink-muted sm:inline">↵ kirim · ⇧↵ baris baru</span>
         {streaming ? (
           <button
             type="button"
             onClick={onStop}
-            className="mb-1 min-h-11 shrink-0 rounded-full bg-ink px-4 text-sm font-medium text-canvas hover:bg-ink-mid"
+            aria-label="Hentikan jawaban"
+            className="ml-auto flex size-9 shrink-0 items-center justify-center rounded-full bg-ink text-canvas hover:bg-ink-mid sm:ml-0"
           >
-            Hentikan
+            <Square size={12} fill="currentColor" />
           </button>
         ) : (
           <button
             type="submit"
             aria-label="Kirim pertanyaan"
-            disabled={disabled || !value.trim()}
-            className="mb-1 flex size-11 shrink-0 items-center justify-center rounded-full bg-teal text-white transition hover:bg-teal-press disabled:cursor-not-allowed disabled:bg-line disabled:text-ink-muted"
+            disabled={!canSend}
+            className="ml-auto flex size-9 shrink-0 items-center justify-center rounded-full bg-ink text-canvas transition hover:bg-ink-mid disabled:cursor-not-allowed disabled:bg-hover disabled:text-ink-muted sm:ml-0"
           >
-            <ArrowUp size={18} />
+            <ArrowUp size={17} strokeWidth={2.25} />
           </button>
         )}
       </div>
-      <p id="question-hint" className="px-4 pb-3 text-sm leading-5 text-ink-muted">
-        Enter untuk mengirim. Shift+Enter untuk baris baru.
-      </p>
     </form>
   );
 }

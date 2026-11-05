@@ -8,10 +8,11 @@ import {
   type ConversationSummary,
   type ThreadMessage,
 } from "../api/types";
-import { Composer } from "../components/Composer";
+import { Composer, type SourceChoice } from "../components/Composer";
 import { EmptyState } from "../components/EmptyState";
 import { MessageList } from "../components/MessageList";
 import { Sidebar } from "../components/Sidebar";
+import type { SourceId } from "../suggestions";
 
 function readableError(error: unknown, fallback: string): string {
   if (error instanceof ApiError && error.message && !/^Request failed \(\d+\)$/.test(error.message)) {
@@ -41,7 +42,7 @@ export function Workspace() {
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [messages, setMessages] = useState<ThreadMessage[]>([]);
   const [draft, setDraft] = useState("");
-  const [source, setSource] = useState<"auto" | "bps" | "bnpb" | "bmkg">("auto");
+  const [source, setSource] = useState<SourceChoice>("auto");
   const [status, setStatus] = useState<string | null>(null);
   const [streaming, setStreaming] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -123,7 +124,7 @@ export function Workspace() {
 
   useEffect(() => {
     const node = scroller.current;
-    if (!node) {
+    if (!node || messages.length === 0) {
       return;
     }
     node.scrollTo({ top: node.scrollHeight, behavior: "smooth" });
@@ -169,7 +170,7 @@ export function Workspace() {
     abortRef.current = controller;
     setDraft("");
     setStreaming(true);
-    setStatus("Memeriksa tabel yang tersedia");
+    setStatus("Memahami pertanyaan");
     setThreadError(null);
     setMessages((current) => [
       ...current,
@@ -251,8 +252,9 @@ export function Workspace() {
     }
   }
 
-  function pickSuggestion(question: string) {
+  function pickSuggestion(question: string, suggested: SourceId) {
     setDraft(question);
+    setSource(suggested);
     composerField.current?.focus();
   }
 
@@ -262,33 +264,17 @@ export function Workspace() {
   const showEmpty = !activeId && messages.length === 0 && !loadingThread && !threadError;
 
   const composer = (
-    <div>
-      <div className="mb-2 flex justify-end">
-        <label className="flex items-center gap-2 text-sm text-ink-mid">
-          Sumber
-          <select
-            value={source}
-            disabled={streaming}
-            onChange={(event) => setSource(event.target.value as typeof source)}
-            className="rounded-lg border border-line bg-elevated px-3 py-2 text-ink"
-          >
-            <option value="auto">Otomatis</option>
-            <option value="bps">BPS</option>
-            <option value="bnpb">BNPB</option>
-            <option value="bmkg">BMKG</option>
-          </select>
-        </label>
-      </div>
-      <Composer
+    <Composer
       value={draft}
+      source={source}
       disabled={streaming}
       streaming={streaming}
       fieldRef={composerField}
       onChange={setDraft}
+      onSourceChange={setSource}
       onSubmit={() => void ask(draft)}
       onStop={stop}
     />
-    </div>
   );
 
   return (
@@ -303,15 +289,11 @@ export function Workspace() {
         onSelect={(id) => leaveFor(`/c/${id}`)}
         onRetryHistory={() => setHistoryReload((current) => current + 1)}
       />
-      <main className="relative flex min-w-0 flex-1 flex-col">
-        <header
-          className={`flex min-h-14 shrink-0 items-center gap-2 border-b border-line bg-canvas px-2 sm:px-4 ${
-            title ? "" : "lg:hidden"
-          }`}
-        >
+      <main className="flex min-w-0 flex-1 flex-col">
+        <header className="flex h-14 shrink-0 items-center gap-2 border-b border-line px-2 sm:px-6 lg:border-transparent">
           <button
             type="button"
-            className="flex size-11 items-center justify-center rounded-lg text-ink-mid hover:bg-user lg:hidden"
+            className="flex size-10 items-center justify-center rounded-lg text-ink-mid hover:bg-subtle lg:hidden"
             aria-label="Buka riwayat"
             aria-expanded={sidebarOpen}
             onClick={() => setSidebarOpen(true)}
@@ -319,34 +301,36 @@ export function Workspace() {
             <Menu size={20} />
           </button>
           {title ? (
-            <h1 className="line-clamp-2 py-2 text-base leading-snug font-medium" title={title}>
+            <p className="min-w-0 truncate text-sm text-ink-mid" title={title}>
               {title}
-            </h1>
+            </p>
           ) : (
-            <p className="reading text-base leading-5 font-medium">Tilik</p>
+            <p className="text-sm font-semibold tracking-[-0.01em] lg:hidden">tilik</p>
           )}
         </header>
 
         <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto">
           {showEmpty ? (
-            <div className="flex min-h-full flex-col justify-center px-4 py-10 sm:px-6">
-              <EmptyState onPick={pickSuggestion} />
-              <div className="mx-auto mt-8 w-full max-w-xl">{composer}</div>
+            <div className="flex min-h-full flex-col justify-center px-5 py-12 sm:px-10">
+              <EmptyState composer={composer} onPick={pickSuggestion} />
             </div>
           ) : (
-            <div className="mx-auto w-full max-w-3xl px-4 pt-8 pb-40 sm:px-6">
+            <div className="mx-auto w-full max-w-3xl px-5 pt-8 pb-16 sm:px-8">
               {loadingThread ? (
-                <p className="text-sm text-ink-mid" role="status">
-                  Membuka pertanyaan
-                </p>
+                <div role="status" className="max-w-md">
+                  <p className="text-sm text-ink-mid">Membuka pertanyaan</p>
+                  <div className="mt-2 h-px overflow-hidden bg-line">
+                    <div className="scan-bar h-px w-1/3 bg-ink" />
+                  </div>
+                </div>
               ) : null}
               {threadError ? (
-                <div className="rounded-xl bg-clay-wash px-4 py-3 text-ink" role="alert">
-                  <p className="text-base leading-6">{threadError}</p>
+                <div className="max-w-[68ch] rounded-xl border-l-2 border-warn bg-warn-wash px-4 py-3" role="alert">
+                  <p className="text-sm leading-6 text-ink">{threadError}</p>
                   <button
                     type="button"
                     onClick={() => setThreadReload((current) => current + 1)}
-                    className="mt-3 min-h-11 rounded-full bg-ink px-4 text-sm font-medium text-canvas"
+                    className="mt-3 min-h-10 rounded-full bg-ink px-4 text-sm font-medium text-canvas hover:bg-ink-mid"
                   >
                     Coba lagi
                   </button>
@@ -360,8 +344,8 @@ export function Workspace() {
         </div>
 
         {showEmpty ? null : (
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-canvas via-canvas to-transparent pt-8">
-            <div className="pointer-events-auto mx-auto w-full max-w-3xl px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-6">
+          <div className="shrink-0 border-t border-line bg-canvas/90 backdrop-blur">
+            <div className="mx-auto w-full max-w-3xl px-5 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-8">
               {composer}
             </div>
           </div>
