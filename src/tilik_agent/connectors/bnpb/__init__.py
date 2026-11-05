@@ -1,0 +1,1 @@
+"""BNPB disaster history connector."""

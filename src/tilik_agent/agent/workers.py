@@ -20,12 +20,19 @@ from tilik_agent.agent.tracing import bind_trace_context
 
 def interpret_request(state: State) -> dict[str, Any]:
     original = state.get("original_question") or state["question"]
-    prompt = f"""Interpret the latest question for a BPS statistics assistant.
+    allowed = state.get("allowed_connectors") or ["bps", "bnpb", "bmkg"]
+    prompt = f"""Interpret the latest question for Tilik, an Indonesian data analyst.
 Return RequestIntent, not a sequence of work steps. The graph owns execution.
-Use source_route=data for BPS observation tables, context for passages in the
-configured publication collection, both only when both types of evidence are
-needed, and direct only when the conversation already supplies the answer or
-the user needs no lookup. Publication search cannot fill missing SQL values.
+Choose 1 or 2 connectors from {allowed}. BPS has statistical tables and SP2020
+publication passages. BNPB has 2010-2024 disaster counts by province/district
+for all disaster types or national series by disaster type. BMKG has live village
+forecasts, earthquakes and active weather alerts. For BPS use source_route=data
+for tables, context for publication, both for both. For other sources use data.
+Use direct only when no lookup is needed. Never interpret a historical BNPB
+count as a current BMKG forecast or a causal relationship.
+Statistical analysis_operation applies only to BPS-only questions. A BPS+BNPB
+comparison may place validated 2024 province values side by side, but does not
+run correlation or regression.
 For province dispersion over time choose analysis_operation=dispersion; for
 relationship choose correlation, fitted models/outliers choose ols, initial
 level versus change choose convergence, and paired survey rounds choose
@@ -42,6 +49,8 @@ Resolve follow-ups into a standalone question using the recent conversation.
                 RequestIntent, prompt if not attempt else prompt + f"\nPrevious invalid intent: {error}"
             )
             intent = RequestIntent.model_validate(intent)
+            if not intent.connectors or set(intent.connectors) - set(allowed):
+                raise ValueError("Intent chose unavailable connectors")
             years = {int(value) for value in re.findall(r"(?<!\d)(?:19|20)\d{2}(?!\d)", original)}
             standalone_years = {int(value) for value in re.findall(r"(?<!\d)(?:19|20)\d{2}(?!\d)", intent.question)}
             if years - standalone_years:
@@ -69,10 +78,36 @@ Resolve follow-ups into a standalone question using the recent conversation.
     return {"plan_error": f"Could not validate request intent: {error}"}
 
 
-def route_sources(state: State) -> Literal["context", "data", "both", "direct", "plan_failed"]:
+def route_sources(state: State) -> Literal["context", "data", "both", "direct", "external", "plan_failed"]:
     if state.get("plan_error"):
         return "plan_failed"
+    if state.get("source_route") == "direct":
+        return "direct"
+    if any(source != "bps" for source in (state.get("intent") or {}).get("connectors", ["bps"])):
+        return "external"
     return state["source_route"]
+
+
+def run_external(state: State) -> dict[str, Any]:
+    """Run selected source servers and retain bounded evidence for one answer."""
+    from tilik_agent.agent.external import compatible_province_pairs, fetch_external
+
+    selected = state["intent"].get("connectors", [])
+    merged: dict[str, Any] = {"used_connectors": selected}
+    if "bps" in selected:
+        route = state["source_route"]
+        if route == "context":
+            merged.update(run_retrieval(state))
+        elif route == "both":
+            merged.update(run_both(state))
+        else:
+            merged.update(run_sql(state))
+    merged["external_evidence"] = fetch_external(state)
+    if "bps" in selected and "bnpb" in selected:
+        merged["cross_source_pairs"] = compatible_province_pairs(
+            merged.get("observations", []), merged["external_evidence"]
+        )
+    return merged
 
 
 def _sql_source(state: State) -> dict[str, Any]:

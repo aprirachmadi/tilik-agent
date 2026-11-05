@@ -67,6 +67,7 @@ export async function streamQuestion(
   conversationId: string | null,
   onStatus: (status: string) => void,
   signal?: AbortSignal,
+  sources?: Array<"bps" | "bnpb" | "bmkg"> | null,
 ): Promise<QuestionResponse> {
   const response = await fetch("/api/questions/stream", {
     method: "POST",
@@ -77,6 +78,7 @@ export async function streamQuestion(
     body: JSON.stringify({
       question,
       conversation_id: conversationId,
+      sources: sources ?? null,
     }),
     signal,
   });

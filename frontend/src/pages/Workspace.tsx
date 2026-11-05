@@ -21,6 +21,7 @@ function readableError(error: unknown, fallback: string): string {
 }
 
 function localizedStatus(value: string): string {
+  if (value.startsWith("Checking ")) return `Memeriksa ${value.slice(9)}`;
   const labels: Record<string, string> = {
     "Looking up datasets": "Mencari tabel BPS",
     "Searching SP2020": "Mencari publikasi SP2020",
@@ -40,6 +41,7 @@ export function Workspace() {
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [messages, setMessages] = useState<ThreadMessage[]>([]);
   const [draft, setDraft] = useState("");
+  const [source, setSource] = useState<"auto" | "bps" | "bnpb" | "bmkg">("auto");
   const [status, setStatus] = useState<string | null>(null);
   const [streaming, setStreaming] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -211,6 +213,7 @@ export function Workspace() {
           if (abortRef.current === controller) setStatus(localizedStatus(value));
         },
         controller.signal,
+        source === "auto" ? null : [source],
       );
       if (abortRef.current !== controller) return;
       setMessages((current) => current.map((message) => (message.pending ? messageFromResult(result) : message)));
@@ -259,7 +262,24 @@ export function Workspace() {
   const showEmpty = !activeId && messages.length === 0 && !loadingThread && !threadError;
 
   const composer = (
-    <Composer
+    <div>
+      <div className="mb-2 flex justify-end">
+        <label className="flex items-center gap-2 text-sm text-ink-mid">
+          Sumber
+          <select
+            value={source}
+            disabled={streaming}
+            onChange={(event) => setSource(event.target.value as typeof source)}
+            className="rounded-lg border border-line bg-elevated px-3 py-2 text-ink"
+          >
+            <option value="auto">Otomatis</option>
+            <option value="bps">BPS</option>
+            <option value="bnpb">BNPB</option>
+            <option value="bmkg">BMKG</option>
+          </select>
+        </label>
+      </div>
+      <Composer
       value={draft}
       disabled={streaming}
       streaming={streaming}
@@ -268,6 +288,7 @@ export function Workspace() {
       onSubmit={() => void ask(draft)}
       onStop={stop}
     />
+    </div>
   );
 
   return (

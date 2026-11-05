@@ -18,8 +18,8 @@ export function EmptyState({ onPick }: EmptyStateProps) {
         Tanyakan data dan temukan sumbernya.
       </h1>
       <p className="mt-3 max-w-[34rem] text-base leading-6 text-ink-mid">
-        Tilik menjawab pertanyaan dari tabel Badan Pusat Statistik (BPS) yang tersedia dan publikasi
-        Statistik Demografi Indonesia hasil Sensus Penduduk 2020 (SP2020). Ketersediaan tahun dan wilayah mengikuti sumber.
+        Tilik membaca tabel BPS, riwayat bencana BNPB, serta prakiraan, gempa, dan
+        peringatan dini BMKG. Tahun, wilayah, dan waktu pembaruan mengikuti tiap sumber.
       </p>
       <p className="mt-6 w-full text-left text-sm font-medium text-ink-mid">Contoh pertanyaan</p>
       <ul className="mt-2 w-full border-b border-line text-left">

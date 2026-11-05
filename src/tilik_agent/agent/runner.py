@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import urlparse
 
 from tilik_agent.agent.answer import answer_blocks
 from tilik_agent.agent.graph import compile_graph
@@ -35,9 +36,22 @@ class QuestionResult:
     chart_error: str | None = None
     trace_id: str | None = None
     sources: list[dict[str, Any]] = field(default_factory=list)
+    used_connectors: list[str] = field(default_factory=list)
+    external_evidence: list[dict[str, Any]] = field(default_factory=list)
 
 
 _TRACE_NODES = frozenset({"agent", "tools"})
+
+
+def _trusted_source_url(provider: str, url: Any) -> str | None:
+    if not isinstance(url, str):
+        return None
+    parsed = urlparse(url)
+    allowed = {
+        "BNPB": {"data.bnpb.go.id"},
+        "BMKG": {"api.bmkg.go.id", "data.bmkg.go.id", "www.bmkg.go.id"},
+    }
+    return url if parsed.scheme == "https" and parsed.hostname in allowed.get(provider, set()) else None
 
 
 def stream_question(
@@ -46,6 +60,7 @@ def stream_question(
     history: Sequence[ChatTurn] | None = None,
     conversation_id: str | None = None,
     callbacks: Sequence[Any] | None = None,
+    sources: list[str] | None = None,
 ) -> Iterator[dict[str, Any]]:
     """Stream graph updates for one question, including each inner SQL step.
 
@@ -63,6 +78,7 @@ def stream_question(
             "question": question,
             "original_question": question,
             "history": list(history or []),
+            "allowed_connectors": sources,
         }
         for item in graph.stream(state, config=config, stream_mode=["updates", "custom"]):
             mode, update = _stream_item(item)
@@ -86,12 +102,15 @@ def _merge_state(state: State, update: dict[str, Any]) -> None:
         state.update(payload)
 
 
-def initial_question_state(question: str, history: Sequence[ChatTurn] | None = None) -> State:
+def initial_question_state(
+    question: str, history: Sequence[ChatTurn] | None = None, sources: list[str] | None = None
+) -> State:
     """Return the graph state for one user message."""
     return {
         "question": question,
         "original_question": question,
         "history": list(history or []),
+        "allowed_connectors": sources,
     }
 
 
@@ -156,6 +175,34 @@ def cited_sources(state: State) -> list[dict[str, Any]]:
             continue
         seen_documents.add(key)
         sources.append({"kind": "document", "document_id": key})
+    cited_external = set(state.get("answer_external_ids") or [])
+    for item in state.get("external_evidence") or []:
+        if item["id"] not in cited_external or "data" not in item:
+            continue
+        data = item["data"]
+        rows = data.get("rows") or []
+        years = [row["year"] for row in rows if isinstance(row.get("year"), int)]
+        warnings = data.get("warnings") or []
+        data_time = data.get("analysis_date")
+        if years:
+            data_time = str(min(years)) if min(years) == max(years) else f"{min(years)}–{max(years)}"
+        elif data.get("events"):
+            data_time = data["events"][0].get("datetime")
+        elif len(warnings) == 1:
+            data_time = warnings[0].get("sent")
+        source_url = warnings[0].get("source_url") if len(warnings) == 1 else data.get("source_url")
+        title = data.get("title") or {
+            "forecast": "Prakiraan cuaca", "earthquakes": "Gempabumi", "warnings": "Peringatan dini cuaca"
+        }.get(data.get("kind"), "Source data")
+        sources.append({
+            "kind": "external", "provider": data.get("provider", item["provider"]),
+            "evidence_id": item["id"],
+            "title": title,
+            "url": _trusted_source_url(data.get("provider", item["provider"]), source_url),
+            "source_id": data.get("resource_id") or data.get("source_id"),
+            "retrieved_at": data.get("retrieved_at"), "data_time": data_time,
+            "expires_at": warnings[0].get("expires") if len(warnings) == 1 else None,
+        })
     return sources
 
 
@@ -183,6 +230,8 @@ def question_result(state: State, *, trace_id: str | None = None) -> QuestionRes
         chart_error=state.get("chart_error"),
         trace_id=trace_id,
         sources=cited_sources(state),
+        used_connectors=state.get("used_connectors") or state.get("intent", {}).get("connectors", []),
+        external_evidence=state.get("external_evidence") or [],
     )
 
 
@@ -192,15 +241,17 @@ def run_question(
     history: Sequence[ChatTurn] | None = None,
     conversation_id: str | None = None,
     callbacks: Sequence[Any] | None = None,
+    sources: list[str] | None = None,
 ) -> QuestionResult:
     """Stream one question and return the merged state."""
-    state = initial_question_state(question, history)
+    state = initial_question_state(question, history, sources)
     trace_id: str | None = None
     for update in stream_question(
         question,
         history=history,
         conversation_id=conversation_id,
         callbacks=callbacks,
+        sources=sources,
     ):
         merge_question_update(state, update)
         trace_id = current_trace_id() or trace_id

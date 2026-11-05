@@ -17,6 +17,83 @@ services:
       retries: 12
       start_period: 10s
 
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_USER: ${POSTGRES_USER:-tilik}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-tilik}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  bps-mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["python", "-m", "tilik_agent.connectors.bps_mcp"]
+    restart: unless-stopped
+    environment:
+      TILIK_MCP_TRANSPORT: streamable-http
+      TILIK_MCP_HOST: 0.0.0.0
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: ${POSTGRES_DB:-tilik}
+      SQL_AGENT_PASSWORD: ${SQL_AGENT_PASSWORD:?Set SQL_AGENT_PASSWORD in .env}
+      POSTGRES_USER: ${POSTGRES_USER:-tilik}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      HF_HOME: /cache/huggingface
+    volumes:
+      - hf_cache:/cache/huggingface
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  bnpb-mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["python", "-m", "tilik_agent.connectors.bnpb.mcp"]
+    restart: unless-stopped
+    environment:
+      TILIK_MCP_TRANSPORT: streamable-http
+      TILIK_MCP_HOST: 0.0.0.0
+      POSTGRES_HOST: postgres
+      POSTGRES_USER: ${POSTGRES_USER:-tilik}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-tilik}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  bmkg-mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["python", "-m", "tilik_agent.connectors.bmkg.mcp"]
+    restart: unless-stopped
+    environment:
+      TILIK_MCP_TRANSPORT: streamable-http
+      TILIK_MCP_HOST: 0.0.0.0
+
+  bnpb-sync:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["sh", "-c", "while true; do if tilik ingest bnpb; then sleep 86400; else sleep 3600; fi; done"]
+    restart: unless-stopped
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_USER: ${POSTGRES_USER:-tilik}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-tilik}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
   api:
     build:
       context: .
@@ -38,6 +115,9 @@ services:
       TILIK_LLM_BASE_URL: ${TILIK_LLM_BASE_URL:-}
       RETRIEVAL_COLLECTION: ${RETRIEVAL_COLLECTION:-}
       SP2020_COLLECTION: ${SP2020_COLLECTION:-}
+      TILIK_BPS_MCP_URL: http://bps-mcp:8000/mcp
+      TILIK_BNPB_MCP_URL: http://bnpb-mcp:8000/mcp
+      TILIK_BMKG_MCP_URL: http://bmkg-mcp:8000/mcp
       HF_HOME: /cache/huggingface
     volumes:
       - hf_cache:/cache/huggingface
@@ -46,6 +126,12 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      bps-mcp:
+        condition: service_started
+      bnpb-mcp:
+        condition: service_started
+      bmkg-mcp:
+        condition: service_started
     healthcheck:
       test:
         [

@@ -90,6 +90,17 @@ def ingest_pdf_command(
     typer.echo(f"PDF chunks in {collection}: {count}")
 
 
+@ingest_app.command("bnpb")
+def ingest_bnpb() -> None:
+    """Synchronize four reviewed BNPB disaster tables through the public CKAN API."""
+    from tilik_agent.connectors.bnpb.ingest import sync_bnpb
+
+    with _session() as session:
+        counts = sync_bnpb(session)
+    for kind, count in counts.items():
+        typer.echo(f"{kind}: {count} new facts")
+
+
 def _load(*, table_id: str | None) -> IngestReport:
     _configure_logging()
     settings = get_settings()

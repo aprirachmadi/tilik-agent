@@ -11,33 +11,26 @@ from pydantic import ValidationError
 from tilik_agent.agent.runtime import model_json
 from tilik_agent.agent.schemas import AnalysisRequest, RequestIntent, SeriesSelection, State
 from tilik_agent.agent.statistics import compute
+from tilik_agent.connectors.bps_tools import available_years
+from tilik_agent.connectors.bps_tools import load_series as load_bps_series
 
 
 def selection_time_error(intent: RequestIntent, selection: SeriesSelection) -> str:
     """Check one SQL selection before it can enter the statistical branch."""
     if intent.start_year is None and intent.end_year is None:
         return ""
-    from tilik_agent.agent.sql import get_connection
-
-    with get_connection() as conn:
-        selected = set(selection.period_labels)
-        all_years = {
-            label
-            for (label,) in conn.execute(
-                "SELECT DISTINCT label FROM period WHERE dataset_id=%s AND label ~ '^[0-9]{4}$'",
-                (selection.dataset_id,),
-            ).fetchall()
-        }
-        if intent.start_year and str(intent.start_year) not in selected:
-            return f"Selection {selection.selection_id} omitted requested start year {intent.start_year}"
-        if intent.end_year and str(intent.end_year) not in selected:
-            return f"Selection {selection.selection_id} omitted requested end year {intent.end_year}"
-        if intent.start_year == intent.end_year and not intent.through_latest and selected != {str(intent.start_year)}:
-            return f"Selection {selection.selection_id} includes periods outside requested year {intent.start_year}"
-        if intent.through_latest:
-            expected = {year for year in all_years if int(year) >= (intent.start_year or 0)}
-            if expected - selected:
-                return f"Selection {selection.selection_id} omitted requested years: {sorted(expected - selected)}"
+    selected = set(selection.period_labels)
+    all_years = available_years(selection.dataset_id)
+    if intent.start_year and str(intent.start_year) not in selected:
+        return f"Selection {selection.selection_id} omitted requested start year {intent.start_year}"
+    if intent.end_year and str(intent.end_year) not in selected:
+        return f"Selection {selection.selection_id} omitted requested end year {intent.end_year}"
+    if intent.start_year == intent.end_year and not intent.through_latest and selected != {str(intent.start_year)}:
+        return f"Selection {selection.selection_id} includes periods outside requested year {intent.start_year}"
+    if intent.through_latest:
+        expected = {year for year in all_years if int(year) >= (intent.start_year or 0)}
+        if expected - selected:
+            return f"Selection {selection.selection_id} omitted requested years: {sorted(expected - selected)}"
     return ""
 
 
@@ -81,7 +74,7 @@ Selections: {json.dumps(summaries, ensure_ascii=False)}"""
             request = model_json(AnalysisRequest, prompt)
             if request.operation != intent.analysis_operation:
                 raise ValueError("Selection choice changed the requested operation")
-        result = compute(request, selections)
+        result = compute(request, selections, loader=load_bps_series)
         return {
             "analysis_results": [result.model_dump()],
             "analysis_error": "",

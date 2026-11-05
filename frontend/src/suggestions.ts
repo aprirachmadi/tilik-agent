@@ -12,16 +12,16 @@ export const suggestions: Suggestion[] = [
   {
     id: "3",
     question:
-      "Berapa selisih tingkat pengangguran terbuka (TPT) Provinsi Jawa Barat antara Februari dan Agustus 2025, dan pada bulan mana nilainya lebih tinggi?",
+      "Bagaimana jumlah kejadian banjir nasional menurut BNPB dari 2019 sampai 2024?",
   },
   {
     id: "7",
     question:
-      "Provinsi mana yang memiliki selisih angka harapan hidup perempuan dan laki-laki terbesar pada 2024, dan berapa nilai kedua angka harapan hidup tersebut?",
+      "Apa gempa terbaru menurut BMKG?",
   },
   {
     id: "10",
     question:
-      "Pada 2025, tiga provinsi mana yang memiliki kesenjangan terbesar antara akses sumber air minum layak dan akses sanitasi layak di perdesaan? Berapa kesenjangan dalam poin persentase di masing-masing provinsi?",
+      "Apakah ada peringatan dini cuaca aktif untuk Jakarta menurut BMKG?",
   },
 ];

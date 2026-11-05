@@ -8,9 +8,9 @@ import re
 from typing import Any, TypeVar
 
 from langchain_core.messages import HumanMessage
-from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_openai import ChatOpenAI
 from langchain_postgres import PGVector
+from openai import LengthFinishReasonError
 from pydantic import BaseModel
 
 from tilik_agent.agent.schemas import State
@@ -21,23 +21,29 @@ SchemaT = TypeVar("SchemaT", bound=BaseModel)
 
 _chat: ChatOpenAI | None = None
 _chat_config: LlmConfig | None = None
+_chat_extra_body: dict[str, Any] | None = None
 
 
 def get_llm() -> ChatOpenAI:
     """Return the chat client, rebuilding it when the yaml ``llm`` block changes."""
-    global _chat, _chat_config
+    global _chat, _chat_config, _chat_extra_body
     config = get_agent_config().llm
-    if _chat is not None and _chat_config == config:
+    extra_body = dict(config.extra_body)
+    thinking = os.getenv("TILIK_LLM_THINK", "").lower()
+    if thinking in {"true", "false"}:
+        extra_body["reasoning_effort"] = "medium" if thinking == "true" else "none"
+    if _chat is not None and _chat_config == config and _chat_extra_body == extra_body:
         return _chat
     _chat = ChatOpenAI(
         model=config.model,
         temperature=config.temperature,
         base_url=config.base_url,
         api_key=os.environ[config.api_key_env],
-        extra_body=config.extra_body,
+        extra_body=extra_body,
         max_tokens=config.max_tokens,
     )
     _chat_config = config
+    _chat_extra_body = extra_body
     return _chat
 
 
@@ -47,6 +53,8 @@ _vector_store_key: tuple[Any, ...] | None = None
 
 def get_vector_store() -> PGVector:
     """Return one vector store, rebuilding it when embedding or collection settings change."""
+    from langchain_huggingface import HuggingFaceEmbeddings
+
     global _vector_store, _vector_store_key
     config = get_agent_config()
     connection = vector_connection()
@@ -82,12 +90,20 @@ def _invoke_kwargs() -> dict[str, Any]:
 
 
 def model_json(schema: type[SchemaT], prompt: str) -> SchemaT:
-    """Use tool-call structured output, as supported by the source SQL agent's LLM."""
-    structured = get_llm().with_structured_output(schema, method="function_calling")
-    for _ in range(2):
-        result = structured.invoke([HumanMessage(content=prompt)], **_invoke_kwargs())
-        if result is not None:
-            return result
+    """Use the selected structured-output mode for the configured model."""
+    method = os.getenv("TILIK_STRUCTURED_OUTPUT_METHOD", "function_calling")
+    if method not in {"function_calling", "json_schema", "auto"}:
+        raise ValueError(f"Unsupported structured-output method: {method}")
+    methods = ("function_calling", "json_schema") if method == "auto" else (method,)
+    for selected in methods:
+        structured = get_llm().with_structured_output(schema, method=selected)
+        for _ in range(2):
+            try:
+                result = structured.invoke([HumanMessage(content=prompt)], **_invoke_kwargs())
+            except LengthFinishReasonError as exc:
+                raise ValueError(f"Model exhausted output budget for {schema.__name__}") from exc
+            if result is not None:
+                return result
     raise ValueError(f"Model returned no {schema.__name__} tool call")
 
 
@@ -138,7 +154,8 @@ def evidence_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         {
             **{key: row.get(key) for key in fields},
             "members": [
-                {key: member.get(key) for key in ("axis", "member_id", "member")} for member in row.get("members", [])
+                {key: member.get(key) for key in ("axis", "dimension_type", "member_id", "member", "canonical_code")}
+                for member in row.get("members", [])
             ],
         }
         for row in rows

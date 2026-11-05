@@ -194,7 +194,12 @@ def _ols(x: list[float], y: list[float]) -> tuple[float, float, float]:
     return slope, intercept, _pearson(x, y) ** 2
 
 
-def compute(request: AnalysisRequest, selections: list[SeriesSelection]) -> AnalysisResult:
+def compute(
+    request: AnalysisRequest,
+    selections: list[SeriesSelection],
+    *,
+    loader: Any = None,
+) -> AnalysisResult:
     selected = {item.selection_id: item for item in selections}
     if len(set(request.selection_ids)) != len(request.selection_ids) or set(request.selection_ids) - set(selected):
         raise ValueError("Unknown or duplicate selection ID")
@@ -202,7 +207,7 @@ def compute(request: AnalysisRequest, selections: list[SeriesSelection]) -> Anal
     if len(request.selection_ids) != required:
         raise ValueError(f"{request.operation} requires {required} selection(s)")
     chosen = [selected[id_] for id_ in request.selection_ids]
-    panels = [load_series(item) for item in chosen]
+    panels = [(loader or load_series)(item) for item in chosen]
     notes = [item.source_note for item in chosen if item.source_note]
     stats: dict[str, Any]
     if request.operation == "dispersion":

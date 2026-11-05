@@ -21,7 +21,7 @@ dataset_lookup:
   max_measures: 30
   max_dimension_members: 200
   max_periods: 50
-  max_observations: 100
+  max_observations: 500
   max_tool_rounds: 8
 
 graph:

@@ -1,0 +1,50 @@
+{
+  "version": "connector-migration-1",
+  "cases": [
+    {
+      "question": "Berapa kejadian banjir di Indonesia pada 2024 menurut BNPB?",
+      "sources": ["bnpb"],
+      "expect": "National flood events in 2024; cite BNPB and the resource, not a province table."
+    },
+    {
+      "question": "Berapa total kejadian bencana di Aceh pada 2024?",
+      "sources": ["bnpb"],
+      "expect": "All disaster types for Aceh in 2024; report the published count."
+    },
+    {
+      "question": "Berapa banjir di Aceh pada 2024?",
+      "sources": ["bnpb"],
+      "expect": "Explain that the reviewed BNPB tables do not provide type by province."
+    },
+    {
+      "question": "Apakah kejadian bencana di Papua Tengah naik sejak 2010?",
+      "sources": ["bnpb"],
+      "expect": "Withhold a cross-year trend because province boundaries are not validated."
+    },
+    {
+      "question": "Apa gempa terbaru menurut BMKG?",
+      "sources": ["bmkg"],
+      "expect": "Use the live latest earthquake feed and display its event and fetch times."
+    },
+    {
+      "question": "Bagaimana prakiraan cuaca Kemayoran besok?",
+      "sources": ["bmkg"],
+      "expect": "Use the verified Kemayoran adm4, identify the forecast production time, and avoid observed-weather claims."
+    },
+    {
+      "question": "Apakah ada peringatan dini cuaca aktif untuk Jakarta?",
+      "sources": ["bmkg"],
+      "expect": "Use current CAP warnings only, respect expiry, and show the feed or CAP link."
+    },
+    {
+      "question": "Bandingkan angka BPS untuk Aceh pada 2024 dengan jumlah kejadian bencana BNPB pada tahun yang sama.",
+      "sources": ["bps", "bnpb"],
+      "expect": "Ask for a specific BPS indicator if ambiguous; join only confirmed 2024 province codes and do not infer causality."
+    },
+    {
+      "question": "Ada peringatan BMKG sekarang; bagaimana riwayat banjir nasional BNPB pada 2024?",
+      "sources": ["bmkg", "bnpb"],
+      "expect": "Place current warnings beside history without treating either as a forecast of disaster occurrence."
+    }
+  ]
+}

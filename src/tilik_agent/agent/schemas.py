@@ -18,6 +18,7 @@ class RequestIntent(BaseModel):
 
     question: str = Field(min_length=1)
     source_route: Literal["context", "data", "both", "direct"]
+    connectors: list[Literal["bps", "bnpb", "bmkg"]] = Field(default_factory=lambda: ["bps"])
     indicator: str | None = None
     analysis_operation: Literal["correlation", "ols", "dispersion", "convergence", "paired_compare"] | None = None
     requested_chart: bool = False
@@ -27,6 +28,10 @@ class RequestIntent(BaseModel):
 
     @model_validator(mode="after")
     def validate_route(self) -> RequestIntent:
+        if len(self.connectors) != len(set(self.connectors)) or len(self.connectors) > 2:
+            raise ValueError("Choose one or two distinct connectors")
+        if self.analysis_operation and self.connectors != ["bps"]:
+            raise ValueError("Statistical operations currently use BPS series only")
         if self.analysis_operation and self.source_route not in {"data", "both"}:
             raise ValueError("Statistical analysis needs SQL data")
         if self.source_route == "direct" and self.requested_chart:
@@ -108,6 +113,7 @@ class AnswerDraft(BaseModel):
     text: str
     observation_ids: list[int] = Field(default_factory=list)
     document_ids: list[str] = Field(default_factory=list)
+    external_ids: list[str] = Field(default_factory=list)
 
 
 ChatRole = Literal["user", "assistant"]
@@ -122,6 +128,11 @@ class State(TypedDict, total=False):
     question: str
     original_question: str
     history: list[ChatTurn]
+    allowed_connectors: list[str] | None
+    external_evidence: list[dict[str, Any]]
+    cross_source_pairs: list[dict[str, Any]]
+    answer_external_ids: list[str]
+    used_connectors: list[str]
     search_query: str
     intent: dict[str, Any]
     source_route: Literal["context", "data", "both", "direct"]

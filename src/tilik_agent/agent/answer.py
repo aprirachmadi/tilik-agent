@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import re
-from decimal import Decimal
+from datetime import datetime
+from decimal import Decimal, InvalidOperation
 from typing import Any, Literal
+from zoneinfo import ZoneInfo
 
 from openai import APIError
 from pydantic import ValidationError
@@ -121,6 +123,13 @@ def chart_needed(state: State) -> Literal["yes", "no"]:
     if state.get("analysis_results"):
         return "no"
     rows = _answer_observation_rows(state)
+    if not rows and state.get("requested_chart"):
+        cited = set(state.get("answer_external_ids") or [])
+        return "yes" if any(
+            item["id"] in cited and item.get("data", {}).get("provider") == "BNPB"
+            and len(item["data"].get("rows", [])) >= 2
+            for item in state.get("external_evidence", [])
+        ) else "no"
     if not rows:
         return "no"
     if state.get("requested_chart"):
@@ -132,6 +141,8 @@ def chart_needed(state: State) -> Literal["yes", "no"]:
 
 def build_chart(state: State) -> dict[str, Any]:
     rows = _answer_observation_rows(state)
+    if not rows:
+        return _build_bnpb_chart(state)
     indexed = {int(row["observation_id"]): row for row in rows}
     prompt = f"""Build a compact declarative chart from the supported answer.
 Return a ChartSpec, not plotting code. Every point's value must match its
@@ -150,6 +161,37 @@ Rows: {compact_json(evidence_rows(rows))}"""
         return {"chart": spec}
     except (ValidationError, ValueError, APIError) as exc:
         return {"chart": None, "chart_error": f"Chart unavailable: {exc}"}
+
+
+def _build_bnpb_chart(state: State) -> dict[str, Any]:
+    cited = set(state.get("answer_external_ids") or [])
+    for item in state.get("external_evidence", []):
+        if item["id"] not in cited:
+            continue
+        data = item.get("data") or {}
+        if data.get("provider") != "BNPB":
+            continue
+        rows = [row for row in data.get("rows", []) if row.get("value") is not None]
+        if len(rows) < 2 or len(rows) > 60:
+            return {"chart": None, "chart_error": "BNPB chart needs 2–60 published values"}
+        years = {row["year"] for row in rows}
+        points = []
+        for row in rows:
+            label = str(row["year"]) if len(years) > 1 else (row.get("geography_name") or row.get("disaster_type"))
+            points.append({
+                "label": label,
+                "series": (row.get("disaster_type") or row.get("geography_name"))
+                if len(years) > 1 else data["measure"],
+                "value": row["value"], "unit": data.get("unit"), "observation_id": row["fact_id"],
+            })
+        return {"chart": ChartSpec(
+            type="line" if len(years) > 1 else "bar",
+            title=data.get("title") or "BNPB disaster series",
+            x_axis="Year" if len(years) > 1 else "Place or type",
+            y_axis=data.get("unit") or "Value",
+            data=points,
+        ).model_dump()}
+    return {"chart": None, "chart_error": "No BNPB values available for a chart"}
 
 
 def display_chart_spec(chart: dict[str, Any] | None) -> None:
@@ -182,6 +224,115 @@ def display_chart_spec(chart: dict[str, Any] | None) -> None:
         )
     figure.update_layout(xaxis_title=spec.x_axis, yaxis_title=spec.y_axis)
     figure.show()
+
+
+def _external_prompt_evidence(state: State) -> list[dict[str, Any]]:
+    evidence = []
+    for item in state.get("external_evidence", []):
+        cleaned = {key: value for key, value in item.items() if key != "snapshot_payload"}
+        data = cleaned.get("data")
+        if data and data.get("provider") == "BMKG" and data.get("retrieved_at"):
+            local = datetime.fromisoformat(data["retrieved_at"]).astimezone(ZoneInfo("Asia/Jakarta"))
+            cleaned["retrieved_at_jakarta"] = local.isoformat()
+        evidence.append(cleaned)
+    return evidence
+
+
+def _number(token: str) -> Decimal:
+    if re.fullmatch(r"\d{1,3}(?:[.,]\d{3})+", token):
+        return Decimal(token.replace(".", "").replace(",", ""))
+    if re.fullmatch(r"\d{1,3}(?:\.\d{3})+,\d+", token):
+        return Decimal(token.replace(".", "").replace(",", "."))
+    if re.fullmatch(r"\d{1,3}(?:,\d{3})+\.\d+", token):
+        return Decimal(token.replace(",", ""))
+    return Decimal(token.replace(",", "."))
+
+
+def _number_values(token: str) -> list[Decimal]:
+    try:
+        return [_number(token)]
+    except InvalidOperation:
+        # Source timestamps can contain several separators, e.g. 03.11.2026.
+        return [Decimal(part) for part in re.split(r"[.,]", token) if part]
+
+
+def _external_number_support(state: State, external_ids: list[str]) -> set[Decimal]:
+    allowed = {Decimal(str(row["value"])) for row in state.get("observations", []) if row.get("value") is not None}
+    for row in state.get("observations", []):
+        if str(row.get("period", "")).isdigit():
+            allowed.add(Decimal(str(row["period"])))
+    number_fields = {"year", "value", "temperature_c", "humidity_pct", "wind_kmh", "magnitude"}
+    text_fields = {
+        "datetime", "local_datetime", "analysis_date", "depth", "location", "coordinates",
+        "description", "headline", "expires", "effective", "sent", "retrieved_at", "felt", "tsunami_note",
+    }
+
+    def collect(value: Any, key: str = "") -> None:
+        if isinstance(value, dict):
+            for child_key, child in value.items():
+                collect(child, child_key)
+        elif isinstance(value, list):
+            for child in value:
+                collect(child, key)
+        elif key in number_fields and isinstance(value, int | float) and not isinstance(value, bool):
+            allowed.add(Decimal(str(value)))
+        elif key in text_fields and isinstance(value, str):
+            for token in re.findall(r"(?<!\w)\d+(?:[.,]\d+)*(?!\w)", value):
+                allowed.update(_number_values(token))
+            for hour, minute, second in re.findall(r"(?<!\d)(\d{1,2}):(\d{2})(?::(\d{2}))?", value):
+                allowed.update({Decimal(hour), Decimal(minute), Decimal(f"{hour}.{minute}")})
+                if second:
+                    allowed.add(Decimal(second))
+
+    for item in state.get("external_evidence", []):
+        if item["id"] not in external_ids or "data" not in item:
+            continue
+        data = item["data"]
+        if data.get("provider") == "BMKG":
+            collect(data)
+        elif data.get("provider") == "BNPB":
+            allowed.update({Decimal(2010), Decimal(2024)})
+            for field in ("source_modified_at", "retrieved_at"):
+                if data.get(field):
+                    collect({"retrieved_at": data[field]})
+            rows = data.get("rows", [])
+            allowed.update(Decimal(str(row["year"])) for row in rows)
+            allowed.add(Decimal(len(rows)))
+            allowed.add(Decimal(len({row["year"] for row in rows})))
+            allowed.update(Decimal(str(row["value"])) for row in rows if row.get("value") is not None)
+            for calc in data.get("calculations", []):
+                allowed.add(Decimal(str(abs(calc["difference"]))))
+                if calc.get("percent_change") is not None:
+                    allowed.add(Decimal(str(abs(calc["percent_change"]))))
+    return allowed
+
+
+def _check_bnpb_numbers(text: str, state: State, external_ids: list[str]) -> None:
+    if not any(
+        item["id"] in external_ids and item.get("data", {}).get("provider") == "BNPB"
+        for item in state.get("external_evidence", [])
+    ):
+        return
+    allowed = _external_number_support(state, external_ids)
+    for token in re.findall(r"(?<!\w)\d+(?:[.,]\d+)*(?!\w)", text):
+        if any((value >= 10 or "." in token or "," in token) and value not in allowed
+               for value in _number_values(token)):
+            raise ValueError(f"Unsupported numeric claim: {token}")
+
+
+def _check_bmkg_numbers(text: str, state: State, external_ids: list[str]) -> None:
+    if not any(
+        item["id"] in external_ids and item.get("data", {}).get("provider") == "BMKG"
+        for item in state.get("external_evidence", [])
+    ):
+        return
+    allowed = _external_number_support(state, external_ids)
+    tokens = re.findall(r"(?<!\w)\d+(?:[.,]\d+)*(?!\w)", text)
+    tokens.extend(re.findall(r"\bM(?:w)?\s*(\d+(?:[.,]\d+)?)", text, flags=re.IGNORECASE))
+    for token in tokens:
+        if any((value >= 10 or "." in token or "," in token) and value not in allowed
+               for value in _number_values(token)):
+            raise ValueError(f"Unsupported numeric claim: {token}")
 
 
 def _answer_prompt(state: State) -> str:
@@ -237,6 +388,15 @@ Step status: {compact_json(state.get("step_status", {}))}
 Observations: {compact_json(evidence_rows(state.get("observations", [])))}
 Source details: {compact_json(evidence_source_details(state.get("source_details", {})))}
 Documents: {compact_json(state.get("documents", []))}
+External source evidence: {compact_json(_external_prompt_evidence(state))}
+Validated cross-source province pairs: {compact_json(state.get("cross_source_pairs", []))}
+For a BPS-BNPB province comparison, use only these validated pairs. If none
+match, explain that the comparison is unavailable. These pairs only cover 2024;
+do not infer a trend or causal link from them.
+For external claims, cite the provider and relevant date in text, and include
+the supporting ext ID in external_ids. A forecast is not observed weather;
+a warning is active only until its expiry.
+For BMKG retrieval dates, use retrieved_at_jakarta rather than the UTC date.
 Intermediate calculations: {compact_json(state.get("intermediate_analysis", {}))}
 Verified statistical results: {compact_json(results)}
 Statistical selections: {compact_json(selections)}
@@ -253,13 +413,31 @@ def write_answer(state: State) -> dict[str, Any]:
         answer = model_json(AnswerDraft, _answer_prompt(state))
         known_rows = set(observation_index(state))
         known_docs = set(document_index(state))
-        if set(answer.observation_ids) - known_rows or set(answer.document_ids) - known_docs:
+        observation_ids = answer.observation_ids
+        document_ids = answer.document_ids
+        external_ids = list(getattr(answer, "external_ids", []))
+        known_external = {item["id"] for item in state.get("external_evidence", []) if "data" in item}
+        if known_external and not known_rows and not known_docs:
+            # External-only answers cannot cite BPS rows or publication passages.
+            observation_ids = []
+            document_ids = []
+            if len(known_external) == 1:
+                # The sole fetched source has an unambiguous provenance ID.
+                external_ids = list(known_external)
+        if (set(observation_ids) - known_rows or set(document_ids) - known_docs
+                or set(external_ids) - known_external):
             raise ValueError("Answer cites unknown evidence IDs")
+        if known_external and not external_ids:
+            raise ValueError("Answer omitted external evidence IDs")
+        _check_bnpb_numbers(answer.text, state, external_ids)
+        _check_bmkg_numbers(answer.text, state, external_ids)
         output = {
             "answer": answer.text,
-            "answer_observation_ids": answer.observation_ids,
-            "answer_document_ids": answer.document_ids,
+            "answer_observation_ids": observation_ids,
+            "answer_document_ids": document_ids,
         }
+        if external_ids:
+            output["answer_external_ids"] = external_ids
         if state.get("analysis_results"):
             output["answer_analysis_selection_ids"] = sorted(
                 {selection_id for item in state["analysis_results"] for selection_id in item["selection_ids"]}

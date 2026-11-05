@@ -2,7 +2,7 @@
 
 # Tilik
 
-**Answers a question about BPS statistics from published observations and the SP2020 demography publication.**
+**Answers Indonesian data questions using BPS, BNPB, and BMKG source connectors.**
 
 ![Python](https://img.shields.io/badge/Python-%E2%89%A53.11-blue?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?logo=fastapi&logoColor=white)
@@ -14,7 +14,7 @@
 
 </div>
 
-Tilik plans the work, looks up figures in Postgres, searches the publication in pgvector, and writes an answer with the observation and document ids it used. When the question asks for a comparison, the response also includes a chart spec a notebook or frontend can draw. It does not search the web.
+Tilik routes each question to its own BPS, BNPB, or BMKG MCP server. BPS reads published observations and SP2020 passages, BNPB reads synchronized disaster aggregates, and BMKG reads official live feeds. The answer includes cited source links and retrieval times. BPS comparisons can also produce a chart.
 
 ## Contents
 
@@ -32,6 +32,8 @@ You need Python 3.11–3.13, [Poetry](https://python-poetry.org/), and Postgres.
 ```powershell
 poetry install
 copy .env.example .env
+poetry run alembic upgrade head
+poetry run tilik ingest bnpb
 poetry run tilik serve
 ```
 
@@ -61,97 +63,89 @@ Open [http://localhost:5173](http://localhost:5173). The dev server proxies `/ap
 
 ## Pipeline
 
-`compile_graph()` in `tilik_agent.agent` builds the graph below. `plan_question` returns a short plan whose steps are `sql_lookup`, `retrieve_document`, or `calculate`. A `both` plan runs the retrieval and SQL loops. A calculation waits until the steps it depends on have finished.
-
 ```mermaid
 flowchart TD
-    START([User question]) --> PLAN[Plan question]
-
-    PLAN -->|context| R[Run retrieval]
-    PLAN -->|data| S[Run SQL lookup]
-    PLAN -->|both| MIX[Run the planned mix]
-    PLAN -->|direct| ANSWER[Write a sourced answer]
-    PLAN -->|plan_failed| ANSWER
-
-    MIX --> R
-    MIX --> S
-
-    subgraph retrieval [Retrieval]
-        R --> SEARCH[Search publication excerpts]
-        SEARCH --> GRADE[Grade each excerpt]
-        GRADE -->|Relevant| RDOC[Return excerpts and sources]
-        GRADE -->|None relevant, rewrites left| REWRITE[Rewrite the search query]
-        REWRITE --> SEARCH
-        GRADE -->|None relevant, rewrite cap reached| RERR[Record a retrieval error]
-    end
-
-    subgraph sql_lookup [SQL lookup]
-        S --> AGENT[Choose the next dataset tool]
-        AGENT -->|search_datasets| FIND[Find datasets]
-        AGENT -->|describe_dataset| DESCRIBE[Inspect measures, periods, and members]
-        AGENT -->|get_observations| VALUES[Get observation rows]
-        FIND --> HARVEST[Harvest rows, units, and source details]
-        DESCRIBE --> HARVEST
-        VALUES --> HARVEST
-        HARVEST -->|More rounds left| AGENT
-        HARVEST -->|Tool-round cap| SDATA[Return rows and warnings]
-        AGENT -->|Brief status| SDATA
-    end
-
-    RDOC --> COLLECT[Collect evidence]
-    RERR --> COLLECT
-    SDATA --> COLLECT
-
-    COLLECT --> CALC{Calculation step?}
-    CALC -->|Yes| VERIFY[Verify arithmetic against stored values]
-    CALC -->|No| ANSWER
-    VERIFY --> ANSWER
-
-    ANSWER --> CHART{Chart needed?}
-    CHART -->|Requested, or a comparison with two values| VIS[Build a chart spec]
-    CHART -->|Not needed| RESP([Response])
-    VIS --> RESP
+    Q[Question] --> I[Interpret place, time, and source]
+    I --> C[Tilik MCP client]
+    C --> B[BPS MCP: observations and SP2020]
+    C --> N[BNPB MCP: synchronized aggregates]
+    C --> M[BMKG MCP: live official feeds]
+    B --> V[Validate evidence and provenance]
+    N --> V
+    M --> V
+    V --> A[Calculate supported comparisons]
+    A --> W[Write grounded answer]
+    W --> P[Save citations and BMKG evidence snapshot]
+    P --> U[Answer, source chips, and optional chart]
+    CKAN[BNPB CKAN DataStore] --> SYNC[Daily idempotent sync]
+    SYNC --> N
+    LIVE[BMKG official JSON and CAP] --> M
 ```
 
-| Route | What runs |
-| --- | --- |
-| `data` | SQL lookups only. |
-| `context` | Search the configured publication collection only. |
-| `both` | The plan's mix of SQL lookups and publication search. |
-| `direct` | No SQL or publication lookup is needed; the answer writer responds from conversation and any gathered evidence. |
-| `plan_failed` | The plan did not validate, so the run goes straight to an answer that says so. |
+Tilik starts the source servers over MCP stdio in local development. Docker Compose
+runs the same servers on its internal network over Streamable HTTP. The BPS
+server owns the existing read-only SQL and publication search; the agent no
+longer opens a BPS SQL connection during answers. The BNPB server uses four
+reviewed 2010–2024 CKAN aggregates. The BMKG server uses official forecasts,
+earthquake feeds, and active weather warnings without API keys.
 
-| Step | What it does |
-| --- | --- |
-| `sql_lookup` | Inner tool agent. It may call `search_datasets`, `describe_dataset`, and `get_observations` through the read-only `sql_agent` role. Values are harvested from the tool results. The agent's reply is only a status. |
-| `retrieve_document` | Searches the configured pgvector collection, grades each excerpt, and rewrites the query up to `retrieval.max_rewrites` times. |
-| `calculate` | Proposes arithmetic over observation ids. The result is checked against the stored values before it is kept. |
-| `write_answer` | Writes the answer from the gathered evidence. |
-| `build_chart` | Adds a chart spec when the question asks for a comparison and at least two cited values exist. The graph returns the spec and does not open a figure. |
+BNPB's province and district tables count **all** disaster types. Type-specific
+counts are national only; Tilik rejects a province-by-type query. BMKG forecasts
+are available for Kemayoran or an explicit validated `adm4` code. Alerts are
+filtered by their CAP expiry time. The first BPS+BNPB comparison is limited to
+same-year 2024 province values with a confirmed BPS province code.
 
-### Dataset search
+For a local Poetry run, apply `poetry run alembic upgrade head` and then run
+`poetry run tilik ingest bnpb` once. Docker Compose runs the migration and
+starts a daily idempotent BNPB refresh automatically. BMKG is fetched live
+and needs no import. The
+[implementation plan](CONNECTOR_MIGRATION_PLAN.md) records the file map and
+source limitations.
 
-`search_datasets` splits the query into words, lowercased and separated at anything that is not a letter or digit. A four-digit word is treated as a year. Every other word is matched on its own against the dataset title and its measure names, so a query does not need to match a title as one phrase.
+### Local Ollama generation smoke test
 
-Each dataset gets 2 points for every word found in its title, and 1 point for every word found only in its measure names. Datasets with no points are left out. The rest are ordered by:
+`.env.local` selects the local `gemma4:12b` Ollama model, its OpenAI-compatible
+endpoint, and an isolated Postgres port. It is ignored by Git. Start Ollama and
+load this file into the shell before running Tilik locally:
 
-1. Parsed datasets first.
-2. Higher score.
-3. Datasets with an observation in a requested year.
-4. Shorter title, because it is usually the more specific table.
-5. Dataset id.
+```bash
+set -a
+. ./.env.local
+set +a
+```
 
-The first `dataset_lookup.max_search_results` rows are returned, and `truncated` is true when that limit is reached. A query that is only a year returns nothing, because years only rank results.
+The smoke script runs one real `run_question` generation through each of the
+BPS, BNPB, and BMKG MCP connectors. It does not call benchmark judges. It
+expects a migrated Postgres with BNPB facts and the BPS province density table.
+For a fresh database using the settings in `.env.local` (Postgres on `127.0.0.1:5431`):
 
-All words count the same. Weighting rare words more (IDF) was tried on the benchmark questions, and it did worse: rare words such as "nasional" pulled in unrelated tables. Words that never appear in a title, such as English terms or region names like "Jakarta", do not match.
+```bash
+docker compose --env-file .env.local -f docker-compose.yml -f docker-compose.dev.yml up -d postgres
+poetry run alembic upgrade head
+poetry run tilik ingest bnpb
+poetry run tilik ingest catalog
+poetry run tilik ingest table --id 'MTQxIzI='
+poetry run python examples/connector_e2e.py
+```
+
+The BPS table import needs `BPS_API_KEY` in `.env`. The BPS smoke question uses
+its published 2021 DKI Jakarta density value. Other BPS questions need their
+own tables ingested first. The database keeps its data in the
+`tilik-agent_pgvector_storage` volume; stop it with
+`docker compose -f docker-compose.yml -f docker-compose.dev.yml stop postgres`.
 
 ## Ask a question
 
-`POST /questions` with a JSON body. The server streams the graph and returns the merged state.
+`POST /questions` with a JSON body. Omit `sources` for automatic routing, or
+pass one or two of `bps`, `bnpb`, and `bmkg` to limit the connectors.
 
 ```json
 { "question": "Provinsi mana saja yang memiliki tiga TPT tertinggi pada Agustus 2025?" }
 ```
+
+For example, `{"question": "Berapa kejadian banjir nasional pada 2024?", "sources": ["bnpb"]}`
+queries BNPB. `{"question": "Gempa terbaru menurut BMKG?", "sources": ["bmkg"]}`
+queries BMKG's live feed.
 
 ```bash
 curl -s -X POST http://127.0.0.1:4321/questions \
@@ -168,6 +162,8 @@ curl.exe --% -s -X POST http://127.0.0.1:4321/questions -H "Content-Type: applic
 | Field | Meaning |
 | --- | --- |
 | `answer` | Text shown to the user. |
+| `sources` | Cited BPS datasets/publications or external source links and freshness details. |
+| `used_connectors` | Source connectors selected for this answer. |
 | `chart` | Chart spec, or `null`. |
 | `answer_observation_ids` | Observation ids cited in the answer. |
 | `answer_document_ids` | Publication document ids cited in the answer. |
@@ -201,10 +197,16 @@ These variables override the file when they are set:
 | `RETRIEVAL_COLLECTION` | `retrieval.collection`. `SP2020_COLLECTION` remains accepted for existing environments. |
 | `PGVECTOR_CONNECTION` | Optional pgvector URL. When unset, the app uses the same URL as the observation database. |
 | `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` | Observation database used by SQL lookup. The password is required in `.env`. |
+| `TILIK_BPS_MCP_URL`, `TILIK_BNPB_MCP_URL`, `TILIK_BMKG_MCP_URL` | Optional internal Streamable HTTP server URLs. Without them, Tilik starts local stdio servers. |
 
 Secrets stay in `.env`. The yaml file only names the API-key variable.
 
 ## Benchmark
+
+For manual connector acceptance, use the source and limitation cases in
+`src/tilik_agent/evals/datasets/connector_questions.json`. BMKG values change
+live, so its cases check source choice, freshness, and wording rather than fixed
+numbers.
 
 `poetry run tilik benchmark` runs the judges on the whole question file. It answers each question in `src/tilik_agent/evals/datasets/demografi_sosial_questions.json` through the same `run_question` path as the API, then scores the metrics whose `enabled` flag is true under `evals.metrics`. It prints each question as it starts. A Langfuse trace for that question is sent when the agent finishes answering, before the judges run. `POST /questions` and the notebook trace the question and do not call the judges.
 
@@ -229,6 +231,7 @@ Ingest writes through `database_url`, built from `POSTGRES_USER`, `POSTGRES_PASS
 | Command | Effect |
 | --- | --- |
 | `poetry run tilik ingest catalog` | Load the national BPS subject catalog. |
+| `poetry run tilik ingest bnpb` | Sync the four reviewed BNPB disaster aggregates through public CKAN DataStore. Safe to repeat. |
 | `poetry run tilik ingest run` | Load every catalogued table. A stopped run resumes finished periods. |
 | `poetry run tilik ingest table --id <bps-table-id>` | Load one catalogued table, including every published year. |
 | `poetry run tilik ingest pdf --pdf <path> --collection <name>` | Chunk any text PDF and replace the named pgvector collection. Set `RETRIEVAL_COLLECTION` to that name when the question agent should search it. |

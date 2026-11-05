@@ -41,7 +41,7 @@ export function Composer({ value, disabled, streaming, fieldRef, onChange, onSub
           rows={1}
           value={value}
           disabled={disabled}
-          placeholder="Tanyakan angka atau perbandingan data BPS"
+          placeholder="Tanyakan data statistik, bencana, cuaca, atau gempa"
           aria-describedby="question-hint"
           className="max-h-40 min-h-11 flex-1 resize-none bg-transparent px-1 py-2.5 text-base leading-6 text-ink caret-teal outline-none placeholder:text-ink-muted disabled:opacity-60"
           onChange={(event) => onChange(event.target.value)}

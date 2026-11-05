@@ -29,7 +29,18 @@ export type DocumentSource = {
   document_id: string;
 };
 
-export type SourceChip = DatasetSource | DocumentSource;
+export type ExternalSource = {
+  kind: "external";
+  provider: string;
+  title: string;
+  url?: string | null;
+  source_id?: string | null;
+  retrieved_at?: string | null;
+  data_time?: string | null;
+  expires_at?: string | null;
+};
+
+export type SourceChip = DatasetSource | DocumentSource | ExternalSource;
 
 export type QuestionResponse = {
   conversation_id: string;
@@ -37,6 +48,7 @@ export type QuestionResponse = {
   chart: ChartSpec | null;
   blocks: AnswerBlock[] | null;
   sources: SourceChip[];
+  used_connectors?: string[];
   source_route: string | null;
   chart_error: string | null;
   plan_error: string | null;

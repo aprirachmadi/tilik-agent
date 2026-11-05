@@ -15,6 +15,16 @@ const SP2020_PUBLICATION_URL =
   "https://www.bps.go.id/id/publication/2025/01/31/29a40174e02f20a7a31b5bc3/statistik-demografi-indonesia--hasil-sensus-penduduk-2020-.html";
 
 function describe(source: SourceChip, index: number): Citation | null {
+  if (source.kind === "external") {
+    return {
+      key: `external-${source.provider}-${source.source_id ?? index}`,
+      title: `${source.provider}: ${source.title}`,
+      detail: [source.data_time, source.retrieved_at ? `Diambil ${source.retrieved_at}` : null,
+        source.expires_at ? `Berlaku hingga ${source.expires_at}` : null]
+        .filter(Boolean).join(" · ") || "Sumber data resmi",
+      href: source.url ?? null,
+    };
+  }
   if (source.kind === "dataset") {
     const tableId = source.bps_table_id?.trim() ?? "";
     const tablesource = source.tablesource?.trim() ?? "";
@@ -60,7 +70,7 @@ export function SourceChips({ sources }: SourceChipsProps) {
             <span className="block text-sm font-medium text-teal">{citation.title}</span>
             <span className="mt-0.5 block text-sm text-ink-mid">
               {citation.detail}
-              {citation.href ? " · Buka di BPS" : ""}
+              {citation.href ? " · Buka sumber" : ""}
             </span>
           </>
         );

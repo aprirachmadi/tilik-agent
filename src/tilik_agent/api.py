@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import queue
 import threading
 from collections.abc import Iterator
 from datetime import datetime
 from functools import lru_cache
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -37,10 +38,11 @@ from tilik_agent.chat.storage import (
     load_history,
 )
 from tilik_agent.config import get_settings
+from tilik_agent.connectors.snapshots import ExternalSourceSnapshot
 from tilik_agent.ingestion.models import Dataset
 
 _FRONTEND_ORIGINS = ("http://localhost:5173", "http://127.0.0.1:5173")
-_SOURCE_NODES = ("run_sql", "run_retrieval", "run_both")
+_SOURCE_NODES = ("run_sql", "run_retrieval", "run_both", "run_external")
 
 app = FastAPI(title="Tilik")
 app.add_middleware(
@@ -54,6 +56,7 @@ app.add_middleware(
 class QuestionRequest(BaseModel):
     question: str = Field(min_length=1)
     conversation_id: str | None = None
+    sources: list[Literal["bps", "bnpb", "bmkg"]] | None = None
 
 
 class QuestionResponse(BaseModel):
@@ -62,6 +65,7 @@ class QuestionResponse(BaseModel):
     chart: dict[str, Any] | None = None
     blocks: list[dict[str, str]] | None = None
     sources: list[dict[str, Any]] = Field(default_factory=list)
+    used_connectors: list[str] = Field(default_factory=list)
     source_route: str | None = None
     chart_error: str | None = None
     answer_observation_ids: list[int] = Field(default_factory=list)
@@ -109,6 +113,9 @@ def status_lines(update: dict[str, Any]) -> list[str]:
     """Map one graph update to the short progress lines the workspace shows."""
     intent = update.get("interpret_request")
     if isinstance(intent, dict):
+        selected = (intent.get("intent") or {}).get("connectors") or ["bps"]
+        if any(source != "bps" for source in selected):
+            return ["Checking " + " and ".join(source.upper() for source in selected)]
         route = intent.get("source_route")
         if route == "data":
             return ["Looking up datasets"]
@@ -144,6 +151,7 @@ def _response(conversation_id: str, result: QuestionResult) -> QuestionResponse:
         chart=result.chart,
         blocks=result.blocks,
         sources=result.sources,
+        used_connectors=result.used_connectors,
         source_route=result.source_route,
         chart_error=result.chart_error,
         answer_observation_ids=result.answer_observation_ids,
@@ -159,6 +167,31 @@ def _response(conversation_id: str, result: QuestionResult) -> QuestionResponse:
 def _save_turn(conversation_id: str, question: str, result: QuestionResult) -> QuestionResponse:
     with _db_session() as session:
         result.sources = _with_tablesource(session, result.sources)
+        external = {item["id"]: item for item in result.external_evidence if "data" in item}
+        for source in result.sources:
+            if source.get("kind") != "external" or source.get("provider") != "BMKG":
+                continue
+            item = external.get(source.get("evidence_id"))
+            if item is None:
+                continue
+            content = {"normalized": item["data"], "raw": item.get("snapshot_payload")}
+            serialized = json.dumps(content, sort_keys=True, ensure_ascii=False, default=str)
+            if len(serialized) > 2_000_000:
+                raise ValueError("Cited BMKG evidence exceeds snapshot size limit")
+            digest = hashlib.sha256(serialized.encode()).hexdigest()
+            snapshot = session.scalar(
+                select(ExternalSourceSnapshot).where(
+                    ExternalSourceSnapshot.provider == "BMKG", ExternalSourceSnapshot.content_sha256 == digest
+                )
+            )
+            if snapshot is None:
+                snapshot = ExternalSourceSnapshot(
+                    provider="BMKG", source_url=str(source.get("url") or ""),
+                    content_sha256=digest, content=content,
+                )
+                session.add(snapshot)
+                session.flush()
+            source["snapshot_id"] = snapshot.id
         append_turn(
             session,
             conversation_id,
@@ -260,7 +293,7 @@ def conversation(conversation_id: str) -> ConversationDetail:
 def questions(body: QuestionRequest) -> QuestionResponse:
     """Answer one question and return the chart spec when the graph built one."""
     conversation_id, history = _open_turn(body)
-    result = run_question(body.question, history=history, conversation_id=conversation_id)
+    result = run_question(body.question, history=history, conversation_id=conversation_id, sources=body.sources)
     return _save_turn(conversation_id, body.question, result)
 
 
@@ -270,10 +303,12 @@ def _sse(event: str, payload: dict[str, Any]) -> str:
 
 def _event_chunks(body: QuestionRequest) -> Iterator[str]:
     conversation_id, history = _open_turn(body)
-    state = initial_question_state(body.question, history)
+    state = initial_question_state(body.question, history, body.sources)
     trace_id: str | None = None
     sent: set[str] = set()
-    for update in stream_question(body.question, history=history, conversation_id=conversation_id):
+    for update in stream_question(
+        body.question, history=history, conversation_id=conversation_id, sources=body.sources
+    ):
         for line in status_lines(update):
             if line in sent:
                 continue

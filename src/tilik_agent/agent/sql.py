@@ -21,6 +21,7 @@ from tilik_agent.agent.runtime import get_llm
 from tilik_agent.agent.schemas import PlanStep
 from tilik_agent.agent.tracing import current_callbacks
 from tilik_agent.config import LlmConfig, get_agent_config
+from tilik_agent.connectors.bps_tools import SQL_TOOLS
 
 
 def get_connection() -> psycopg.Connection:
@@ -267,8 +268,10 @@ def get_observations(
                    array_agg(
                        json_build_object(
                            'axis', d.original_label,
+                           'dimension_type', d.dimension_type,
                            'member_id', dm.id,
-                           'member', dm.original_label
+                           'member', dm.original_label,
+                           'canonical_code', dm.canonical_code
                        ) ORDER BY d.id
                    ) AS members
             FROM observation o
@@ -359,9 +362,6 @@ percentages or combine totals with their component categories. If a tool
 returns incomplete or truncated data, do not pretend it is complete.
 After the necessary tool calls, give only a short completion status. Do not
 write a user-facing report or repeat the observation values.""")
-
-
-SQL_TOOLS = [search_datasets, describe_dataset, get_observations, select_series]
 
 
 def build_agent(chat_model: ChatOpenAI):
@@ -520,7 +520,7 @@ def _sql_step_once(
                 break
     except GraphRecursionError:
         ctx["errors"].append(f"SQL graph recursion limit ({recursion_limit}) reached")
-    except (psycopg.Error, ConnectionError, TimeoutError, OSError, APIError) as exc:
+    except (psycopg.Error, ConnectionError, TimeoutError, OSError, APIError, RuntimeError) as exc:
         ctx["errors"].append(f"SQL source error: {exc}")
     finally:
         var_child_runnable_config.reset(parent_config)

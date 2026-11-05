@@ -9,9 +9,10 @@ from langchain_core.documents import Document
 from openai import APIError
 from sqlalchemy.exc import SQLAlchemyError
 
-from tilik_agent.agent.runtime import _parse_json_object, get_vector_store, llm_text
+from tilik_agent.agent.runtime import _parse_json_object, llm_text
 from tilik_agent.agent.schemas import PlanStep
 from tilik_agent.config import get_agent_config
+from tilik_agent.connectors.mcp_client import call_bps
 
 
 def _document_record(doc: Document, step_id: str, rank: int) -> dict[str, Any]:
@@ -30,9 +31,11 @@ def _retrieve_step(step: PlanStep, question: str, dependency: str = "") -> dict[
         query += "\nRelevant preceding evidence: " + dependency[:4000]
     retrieval = get_agent_config().retrieval
     try:
-        vector_store = get_vector_store()
         for rewrite_count in range(retrieval.max_rewrites + 1):
-            hits = vector_store.similarity_search(query, k=retrieval.top_k)
+            hits = [
+                Document(page_content=item["content"], metadata=item.get("metadata") or {})
+                for item in call_bps("bps_search_publication", {"query": query, "limit": retrieval.top_k})
+            ]
             kept: list[dict[str, Any]] = []
             for rank, doc in enumerate(hits, start=1):
                 prompt = f"""Does this excerpt help answer the question?
@@ -60,5 +63,5 @@ Excerpt: {doc.page_content[:800]}"""
             "search_query": query,
             "retrieval_error": f"No relevant publication excerpts found after {retrieval.max_rewrites} rewrites",
         }
-    except (psycopg.Error, SQLAlchemyError, ConnectionError, TimeoutError, OSError, APIError) as exc:
+    except (psycopg.Error, SQLAlchemyError, ConnectionError, TimeoutError, OSError, APIError, RuntimeError) as exc:
         return {"documents": [], "search_query": query, "retrieval_error": str(exc)}
