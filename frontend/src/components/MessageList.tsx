@@ -1,9 +1,11 @@
+import { User } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { Components } from "react-markdown";
 import Markdown from "react-markdown";
 import type { ChartSpec, SourceChip, ThreadMessage } from "../api/types";
 import { Callout } from "./Callout";
 import { ChartCard } from "./ChartCard";
+import { Logo } from "./Logo";
 import { SourceChips } from "./SourceChips";
 
 const markdown: Components = {
@@ -91,7 +93,13 @@ export function MessageList({ messages, status, busy, onRetry }: MessageListProp
         if (message.role === "user") {
           return (
             <li key={message.key} className={`rise ${index > 0 ? "mt-14 border-t border-line pt-10" : ""}`}>
-              <h2 className="max-w-[40ch] text-[1.375rem] leading-[1.3] font-semibold tracking-[-0.02em] break-words whitespace-pre-wrap text-ink sm:text-[1.625rem]">
+              <p className="eyebrow flex items-center gap-2">
+                <span className="flex size-4 items-center justify-center rounded-full border border-line-strong text-ink-mid" aria-hidden="true">
+                  <User size={10} strokeWidth={2.5} />
+                </span>
+                Anda
+              </p>
+              <h2 className="mt-2.5 max-w-[40ch] text-[1.375rem] leading-[1.3] font-semibold tracking-[-0.02em] break-words whitespace-pre-wrap text-ink sm:text-[1.625rem]">
                 {message.content}
               </h2>
             </li>
@@ -117,7 +125,10 @@ export function MessageList({ messages, status, busy, onRetry }: MessageListProp
               (message.content || orderedBlocks) && (
                 <section aria-label="Jawaban">
                   <div className="mb-3 flex flex-wrap items-center gap-x-2 gap-y-1">
-                    <h3 className="eyebrow">Jawaban</h3>
+                    <h3 className="eyebrow flex items-center gap-2 text-ink">
+                      <Logo size={16} />
+                      Tilik
+                    </h3>
                     {answerProviders.map((provider) => (
                       <span key={provider} className="eyebrow text-ink">· {provider}</span>
                     ))}
