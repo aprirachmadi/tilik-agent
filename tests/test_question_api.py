@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -16,11 +17,18 @@ from sqlalchemy.pool import StaticPool
 from tilik_agent.agent.answer import answer_blocks
 from tilik_agent.agent.runner import cited_sources, question_result, run_question, stream_question
 from tilik_agent.agent.schemas import State
-from tilik_agent.api import app, status_lines
+from tilik_agent.api import VISITOR_COOKIE, app, status_lines
 from tilik_agent.chat.models import Conversation, Message
 from tilik_agent.chat.storage import list_conversations, load_full_thread
 from tilik_agent.config import get_agent_config
 from tilik_agent.ingestion.models import Dataset
+
+VISITOR = "8f1f0c4e-4a52-4b8e-9d0a-1f2b3c4d5e6f"
+
+
+def _client(**kwargs: Any) -> TestClient:
+    """A browser that already holds the test visitor cookie."""
+    return TestClient(app, cookies={VISITOR_COOKIE: VISITOR}, **kwargs)
 
 
 class _Graph:
@@ -84,7 +92,7 @@ def test_questions_returns_answer_and_chart(monkeypatch: pytest.MonkeyPatch, cha
     """
     monkeypatch.setattr("tilik_agent.agent.runner.compile_graph", lambda: _Graph())
     monkeypatch.setattr("tilik_agent.agent.tracing.langfuse_configured", lambda: False)
-    response = TestClient(app).post("/questions", json={"question": "berapa"})
+    response = _client().post("/questions", json={"question": "berapa"})
     assert response.status_code == 200
     body = response.json()
     assert body["answer"] == "Papua 6,96"
@@ -330,7 +338,7 @@ def test_questions_persists_chart_sources_and_lists_the_thread(
     """
     monkeypatch.setattr("tilik_agent.agent.runner.compile_graph", lambda: _WorkspaceGraph())
     monkeypatch.setattr("tilik_agent.agent.runner.current_trace_id", lambda: "trace-abc")
-    client = TestClient(app)
+    client = _client()
     created = client.post("/questions", json={"question": "berapa TPT Papua"})
     assert created.status_code == 200
     body = created.json()
@@ -390,7 +398,7 @@ def test_questions_persists_chart_sources_and_lists_the_thread(
 @pytest.mark.parametrize("path", ["/questions", "/questions/stream"])
 def test_placed_chart_round_trips(path: str, monkeypatch: pytest.MonkeyPatch, chat_db: Session) -> None:
     monkeypatch.setattr("tilik_agent.agent.runner.compile_graph", lambda: _PlacedChartGraph())
-    response = TestClient(app).post(path, json={"question": "grafik"})
+    response = _client().post(path, json={"question": "grafik"})
     assert response.status_code == 200
     body = (
         response.json()
@@ -403,7 +411,7 @@ def test_placed_chart_round_trips(path: str, monkeypatch: pytest.MonkeyPatch, ch
         {"type": "chart"},
         {"type": "text", "text": "Interpretation."},
     ]
-    detail = TestClient(app).get(f"/conversations/{body['conversation_id']}").json()
+    detail = _client().get(f"/conversations/{body['conversation_id']}").json()
     saved = detail["messages"][1]
     assert saved["content"] == body["answer"]
     assert saved["blocks"] == body["blocks"]
@@ -411,11 +419,11 @@ def test_placed_chart_round_trips(path: str, monkeypatch: pytest.MonkeyPatch, ch
 
 
 def test_old_message_has_no_blocks(chat_db: Session) -> None:
-    chat_db.add(Conversation(id="old-thread"))
+    chat_db.add(Conversation(id="old-thread", owner_id=VISITOR))
     chat_db.add(Message(conversation_id="old-thread", role="assistant", content="Old answer", chart=_CHART))
     chat_db.commit()
 
-    detail = TestClient(app).get("/conversations/old-thread")
+    detail = _client().get("/conversations/old-thread")
     assert detail.status_code == 200
     assert detail.json()["messages"][0]["blocks"] is None
 
@@ -468,7 +476,7 @@ def test_saved_answer_fills_tablesource(monkeypatch: pytest.MonkeyPatch, chat_db
     chat_db.commit()
     monkeypatch.setattr("tilik_agent.agent.runner.compile_graph", lambda: _SourceWithoutTablesourceGraph())
 
-    created = TestClient(app).post("/questions", json={"question": "berapa penduduk"})
+    created = _client().post("/questions", json={"question": "berapa penduduk"})
     assert created.status_code == 200
     source = created.json()["sources"][0]
     assert source["tablesource"] == "2"
@@ -497,7 +505,7 @@ def test_reloaded_source_gains_tablesource(chat_db: Session) -> None:
             title="Jumlah Penduduk Pertengahan Tahun (Ribu Jiwa)",
         )
     )
-    chat_db.add(Conversation(id="saved-thread", title="penduduk"))
+    chat_db.add(Conversation(id="saved-thread", owner_id=VISITOR, title="penduduk"))
     chat_db.add(
         Message(
             conversation_id="saved-thread",
@@ -515,7 +523,7 @@ def test_reloaded_source_gains_tablesource(chat_db: Session) -> None:
     )
     chat_db.commit()
 
-    detail = TestClient(app).get("/conversations/saved-thread")
+    detail = _client().get("/conversations/saved-thread")
     assert detail.status_code == 200
     source = detail.json()["messages"][0]["sources"][0]
     assert source["tablesource"] == "2"
@@ -531,12 +539,12 @@ def test_chart_error_round_trips(monkeypatch: pytest.MonkeyPatch, chat_db: Sessi
     The response and the stored assistant message keep chart null and the error text.
     """
     monkeypatch.setattr("tilik_agent.agent.runner.compile_graph", lambda: _ChartFailedGraph())
-    response = TestClient(app).post("/questions", json={"question": "berapa"})
+    response = _client().post("/questions", json={"question": "berapa"})
     assert response.status_code == 200
     body = response.json()
     assert body["chart"] is None
     assert body["chart_error"] == "Chart unavailable: mismatch"
-    detail = TestClient(app).get(f"/conversations/{body['conversation_id']}").json()
+    detail = _client().get(f"/conversations/{body['conversation_id']}").json()
     assert detail["messages"][1]["chart"] is None
     assert detail["messages"][1]["chart_error"] == "Chart unavailable: mismatch"
 
@@ -550,11 +558,11 @@ def test_null_answer_keeps_the_user_message(monkeypatch: pytest.MonkeyPatch, cha
     The conversation id is returned, the user message is stored, and there is no assistant row.
     """
     monkeypatch.setattr("tilik_agent.agent.runner.compile_graph", lambda: _EmptyAnswerGraph())
-    response = TestClient(app).post("/questions", json={"question": "halo"})
+    response = _client().post("/questions", json={"question": "halo"})
     assert response.status_code == 200
     body = response.json()
     assert body["answer"] is None
-    loaded = load_full_thread(chat_db, body["conversation_id"])
+    loaded = load_full_thread(chat_db, body["conversation_id"], VISITOR)
     assert loaded is not None
     _, messages = loaded
     assert [message.role for message in messages] == ["user"]
@@ -569,12 +577,12 @@ def test_failed_run_keeps_the_conversation(monkeypatch: pytest.MonkeyPatch, chat
     The request fails and the conversation row remains, with no messages, so the client can retry.
     """
     monkeypatch.setattr("tilik_agent.agent.runner.compile_graph", lambda: _RaisingGraph())
-    response = TestClient(app, raise_server_exceptions=False).post("/questions", json={"question": "berapa"})
+    response = _client(raise_server_exceptions=False).post("/questions", json={"question": "berapa"})
     assert response.status_code == 500
-    rows = list_conversations(chat_db)
+    rows = list_conversations(chat_db, VISITOR)
     assert len(rows) == 1
     assert rows[0].title == "berapa"
-    loaded = load_full_thread(chat_db, rows[0].id)
+    loaded = load_full_thread(chat_db, rows[0].id, VISITOR)
     assert loaded is not None
     assert loaded[1] == []
 
@@ -590,7 +598,7 @@ def test_questions_stream_ends_with_the_json_payload(monkeypatch: pytest.MonkeyP
     """
     monkeypatch.setattr("tilik_agent.agent.runner.compile_graph", lambda: _WorkspaceGraph())
     monkeypatch.setattr("tilik_agent.api.current_trace_id", lambda: "trace-sse")
-    response = TestClient(app).post("/questions/stream", json={"question": "berapa TPT Papua"})
+    response = _client().post("/questions/stream", json={"question": "berapa TPT Papua"})
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/event-stream")
     events = _events(response.text)
@@ -604,11 +612,56 @@ def test_questions_stream_ends_with_the_json_payload(monkeypatch: pytest.MonkeyP
     assert result_events[0]["answer"] == "Papua 6,96"
     assert result_events[0]["chart"] == _CHART
     assert "trace_id" not in result_events[0]
-    detail = TestClient(app).get(f"/conversations/{result_events[0]['conversation_id']}").json()
+    detail = _client().get(f"/conversations/{result_events[0]['conversation_id']}").json()
     assert detail["messages"][1]["content"] == "Papua 6,96"
     stored = chat_db.get(Message, detail["messages"][1]["id"])
     assert stored is not None
     assert stored.trace_id == "trace-sse"
+
+
+def test_visitors_only_reach_their_own_conversations(monkeypatch: pytest.MonkeyPatch, chat_db: Session) -> None:
+    """
+    Condition:
+    One browser asks a question, then a second browser with its own visitor cookie uses that conversation id.
+
+    Expected:
+    The second browser sees no threads and gets 404 when it opens, continues, or streams into the first thread,
+    which keeps only its original turn.
+    """
+    monkeypatch.setattr("tilik_agent.agent.runner.compile_graph", lambda: _WorkspaceGraph())
+    owner = _client()
+    created = owner.post("/questions", json={"question": "berapa TPT Papua"}).json()
+    other = TestClient(app, cookies={VISITOR_COOKIE: "3c9e6f12-7d4b-4a8e-b1c2-0d9e8f7a6b5c"})
+
+    assert other.get("/conversations").json() == []
+    assert other.get(f"/conversations/{created['conversation_id']}").status_code == 404
+    follow_up = {"question": "dan tahun 2024", "conversation_id": created["conversation_id"]}
+    assert other.post("/questions", json=follow_up).status_code == 404
+    assert other.post("/questions/stream", json=follow_up).status_code == 404
+
+    assert [row["id"] for row in owner.get("/conversations").json()] == [created["conversation_id"]]
+    thread = owner.get(f"/conversations/{created['conversation_id']}").json()
+    assert [message["role"] for message in thread["messages"]] == ["user", "assistant"]
+
+
+@pytest.mark.parametrize("cookie", [None, "not-a-uuid"])
+def test_first_visit_gets_a_private_visitor_cookie(cookie: str | None, chat_db: Session) -> None:
+    """
+    Condition:
+    A browser arrives without a visitor cookie, or with a value that is not a UUID.
+
+    Expected:
+    The response sets a fresh random visitor id that scripts cannot read and that only travels over HTTPS.
+    """
+    client = TestClient(app, cookies={VISITOR_COOKIE: cookie} if cookie else None)
+    header = client.get("/conversations").headers["set-cookie"]
+    value = header.split(";")[0].removeprefix(f"{VISITOR_COOKIE}=")
+    assert value != cookie and str(uuid.UUID(value)) == value
+    assert "HttpOnly" in header and "Secure" in header and "SameSite=lax" in header
+
+
+def test_known_visitor_keeps_its_cookie(chat_db: Session) -> None:
+    assert "set-cookie" not in _client().get("/conversations").headers
 
 
 def test_cors_allows_the_local_frontend() -> None:
@@ -619,7 +672,7 @@ def test_cors_allows_the_local_frontend() -> None:
     Expected:
     The response allows that origin.
     """
-    response = TestClient(app).options(
+    response = _client().options(
         "/questions",
         headers={"Origin": "http://127.0.0.1:5173", "Access-Control-Request-Method": "POST"},
     )

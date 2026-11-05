@@ -14,16 +14,26 @@ from tilik_agent.chat.models import Conversation, Message
 from tilik_agent.config import get_agent_config
 
 
-def ensure_conversation(session: Session, conversation_id: str | None) -> str:
-    """Return an existing conversation id or create a new row."""
+class ConversationNotFound(LookupError):
+    """The conversation does not exist, or belongs to another visitor."""
+
+
+def owned_conversation(session: Session, conversation_id: str, owner_id: str) -> Conversation | None:
+    """Return the conversation only when this visitor owns it."""
+    conversation = session.get(Conversation, conversation_id)
+    if conversation is None or conversation.owner_id != owner_id:
+        return None
+    return conversation
+
+
+def ensure_conversation(session: Session, conversation_id: str | None, owner_id: str) -> str:
+    """Return the visitor's existing conversation id, or create a new row when none is given."""
     if conversation_id:
-        existing = session.get(Conversation, conversation_id)
-        if existing is None:
-            session.add(Conversation(id=conversation_id))
-            session.flush()
+        if owned_conversation(session, conversation_id, owner_id) is None:
+            raise ConversationNotFound(conversation_id)
         return conversation_id
     new_id = str(uuid.uuid4())
-    session.add(Conversation(id=new_id))
+    session.add(Conversation(id=new_id, owner_id=owner_id))
     session.flush()
     return new_id
 
@@ -77,16 +87,22 @@ def append_turn(
     session.commit()
 
 
-def list_conversations(session: Session) -> list[Conversation]:
-    """Return every thread, newest activity first."""
+def list_conversations(session: Session, owner_id: str) -> list[Conversation]:
+    """Return the visitor's threads, newest activity first."""
     return list(
-        session.scalars(select(Conversation).order_by(Conversation.updated_at.desc(), Conversation.created_at.desc()))
+        session.scalars(
+            select(Conversation)
+            .where(Conversation.owner_id == owner_id)
+            .order_by(Conversation.updated_at.desc(), Conversation.created_at.desc())
+        )
     )
 
 
-def load_full_thread(session: Session, conversation_id: str) -> tuple[Conversation, list[Message]] | None:
-    """Return one conversation and every message, or none when the id is unknown."""
-    conversation = session.get(Conversation, conversation_id)
+def load_full_thread(
+    session: Session, conversation_id: str, owner_id: str
+) -> tuple[Conversation, list[Message]] | None:
+    """Return one of the visitor's conversations with every message, or none when it is not theirs."""
+    conversation = owned_conversation(session, conversation_id, owner_id)
     if conversation is None:
         return None
     messages = list(

@@ -355,7 +355,7 @@ def test_saved_bmkg_answer_keeps_original_payload(monkeypatch: pytest.MonkeyPatc
     for table in (Conversation.__table__, Message.__table__, ExternalSourceSnapshot.__table__):
         table.create(engine)
     with Session(engine) as session:
-        session.add(Conversation(id="00000000-0000-0000-0000-000000000001"))
+        session.add(Conversation(id="00000000-0000-0000-0000-000000000001", owner_id="visitor"))
         session.commit()
     monkeypatch.setattr(api, "_db_session", lambda: Session(engine))
     result = QuestionResult(

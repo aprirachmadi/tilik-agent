@@ -6,14 +6,15 @@ import hashlib
 import json
 import queue
 import threading
+import uuid
 from collections.abc import Iterator
 from datetime import datetime
 from functools import lru_cache
 from typing import Any, Literal
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import create_engine, select, text
 from sqlalchemy.orm import Session
@@ -30,6 +31,7 @@ from tilik_agent.agent.schemas import ChatTurn
 from tilik_agent.agent.tracing import current_trace_id
 from tilik_agent.chat.models import Conversation, Message
 from tilik_agent.chat.storage import (
+    ConversationNotFound,
     append_turn,
     conversation_title_from_question,
     ensure_conversation,
@@ -43,6 +45,8 @@ from tilik_agent.ingestion.models import Dataset
 
 _FRONTEND_ORIGINS = ("http://localhost:5173", "http://127.0.0.1:5173")
 _SOURCE_NODES = ("run_sql", "run_retrieval", "run_both", "run_external")
+VISITOR_COOKIE = "tilik_visitor"
+_VISITOR_MAX_AGE = 60 * 60 * 24 * 365
 
 app = FastAPI(title="Tilik")
 app.add_middleware(
@@ -51,6 +55,33 @@ app.add_middleware(
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
+
+
+def _valid_visitor(value: str) -> bool:
+    try:
+        return str(uuid.UUID(value)) == value
+    except ValueError:
+        return False
+
+
+@app.middleware("http")
+async def assign_visitor(request: Request, call_next: Any) -> Response:
+    """Give each browser a private random id; every conversation belongs to one."""
+    visitor = request.cookies.get(VISITOR_COOKIE, "")
+    fresh = not _valid_visitor(visitor)
+    if fresh:
+        visitor = str(uuid.uuid4())
+    request.state.visitor_id = visitor
+    response: Response = await call_next(request)
+    if fresh:
+        response.set_cookie(
+            VISITOR_COOKIE, visitor, max_age=_VISITOR_MAX_AGE, httponly=True, secure=True, samesite="lax"
+        )
+    return response
+
+
+def _visitor(request: Request) -> str:
+    return request.state.visitor_id
 
 
 class QuestionRequest(BaseModel):
@@ -133,9 +164,13 @@ def status_lines(update: dict[str, Any]) -> list[str]:
     return []
 
 
-def _open_turn(body: QuestionRequest) -> tuple[str, list[ChatTurn]]:
+def _open_turn(body: QuestionRequest, visitor: str) -> tuple[str, list[ChatTurn]]:
+    """Open the visitor's conversation for a new turn; another visitor's id reads as missing."""
     with _db_session() as session:
-        conversation_id = ensure_conversation(session, body.conversation_id)
+        try:
+            conversation_id = ensure_conversation(session, body.conversation_id, visitor)
+        except ConversationNotFound:
+            raise HTTPException(status_code=404, detail="Conversation not found") from None
         history = load_history(session, conversation_id) if body.conversation_id else []
         conversation = session.get(Conversation, conversation_id)
         if conversation is not None and conversation.title is None and not history:
@@ -269,17 +304,17 @@ def health() -> JSONResponse:
 
 
 @app.get("/conversations")
-def conversations() -> list[ConversationSummary]:
-    """List threads for the sidebar, newest activity first."""
+def conversations(visitor: str = Depends(_visitor)) -> list[ConversationSummary]:
+    """List this visitor's threads for the sidebar, newest activity first."""
     with _db_session() as session:
-        return [_summary(row) for row in list_conversations(session)]
+        return [_summary(row) for row in list_conversations(session, visitor)]
 
 
 @app.get("/conversations/{conversation_id}")
-def conversation(conversation_id: str) -> ConversationDetail:
-    """Return one thread, including charts and source chips saved on assistant messages."""
+def conversation(conversation_id: str, visitor: str = Depends(_visitor)) -> ConversationDetail:
+    """Return one of this visitor's threads, including charts and source chips saved on assistant messages."""
     with _db_session() as session:
-        loaded = load_full_thread(session, conversation_id)
+        loaded = load_full_thread(session, conversation_id, visitor)
         if loaded is None:
             raise HTTPException(status_code=404, detail="Conversation not found")
         row, messages = loaded
@@ -290,9 +325,9 @@ def conversation(conversation_id: str) -> ConversationDetail:
 
 
 @app.post("/questions")
-def questions(body: QuestionRequest) -> QuestionResponse:
+def questions(body: QuestionRequest, visitor: str = Depends(_visitor)) -> QuestionResponse:
     """Answer one question and return the chart spec when the graph built one."""
-    conversation_id, history = _open_turn(body)
+    conversation_id, history = _open_turn(body, visitor)
     result = run_question(body.question, history=history, conversation_id=conversation_id, sources=body.sources)
     return _save_turn(conversation_id, body.question, result)
 
@@ -301,8 +336,7 @@ def _sse(event: str, payload: dict[str, Any]) -> str:
     return f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
-def _event_chunks(body: QuestionRequest) -> Iterator[str]:
-    conversation_id, history = _open_turn(body)
+def _event_chunks(body: QuestionRequest, conversation_id: str, history: list[ChatTurn]) -> Iterator[str]:
     state = initial_question_state(body.question, history, body.sources)
     trace_id: str | None = None
     sent: set[str] = set()
@@ -321,13 +355,13 @@ def _event_chunks(body: QuestionRequest) -> Iterator[str]:
     yield _sse("result", saved.model_dump(mode="json"))
 
 
-def _event_stream(body: QuestionRequest) -> Iterator[str]:
+def _event_stream(body: QuestionRequest, conversation_id: str, history: list[ChatTurn]) -> Iterator[str]:
     """Yield SSE chunks from one thread so the question trace stays in one context."""
     chunks: queue.Queue[str | Exception | None] = queue.Queue()
 
     def produce() -> None:
         try:
-            for chunk in _event_chunks(body):
+            for chunk in _event_chunks(body, conversation_id, history):
                 chunks.put(chunk)
         except Exception as exc:
             chunks.put(exc)
@@ -345,10 +379,11 @@ def _event_stream(body: QuestionRequest) -> Iterator[str]:
 
 
 @app.post("/questions/stream")
-def questions_stream(body: QuestionRequest) -> StreamingResponse:
+def questions_stream(body: QuestionRequest, visitor: str = Depends(_visitor)) -> StreamingResponse:
     """Stream a few status lines, then the same payload as POST /questions."""
+    conversation_id, history = _open_turn(body, visitor)
     return StreamingResponse(
-        _event_stream(body),
+        _event_stream(body, conversation_id, history),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache"},
     )
