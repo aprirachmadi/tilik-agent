@@ -1,4 +1,4 @@
-import { Menu } from "lucide-react";
+import { Menu, Pin } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { ApiError, getConversation, listConversations, streamQuestion } from "../api/client";
@@ -165,7 +165,8 @@ export function Workspace() {
     if (!text || streaming) {
       return;
     }
-    const conversationAtSend = activeId;
+    // A pinned example is read-only, so asking from it starts the visitor's own conversation.
+    const conversationAtSend = activePinned ? null : activeId;
     const controller = new AbortController();
     abortRef.current = controller;
     setDraft("");
@@ -173,7 +174,7 @@ export function Workspace() {
     setStatus("Memahami pertanyaan");
     setThreadError(null);
     setMessages((current) => [
-      ...current,
+      ...(conversationAtSend ? current : []),
       {
         key: `user-${Date.now()}`,
         role: "user",
@@ -258,9 +259,10 @@ export function Workspace() {
     composerField.current?.focus();
   }
 
-  const title =
-    conversations.find((conversation) => conversation.id === activeId)?.title?.trim() ||
-    (activeId ? "Pertanyaan tanpa judul" : null);
+  const active = conversations.find((conversation) => conversation.id === activeId);
+  const activePinned = Boolean(active?.pinned);
+  const example = conversations.find((conversation) => conversation.pinned);
+  const title = active?.title?.trim() || (activeId ? "Pertanyaan tanpa judul" : null);
   const showEmpty = !activeId && messages.length === 0 && !loadingThread && !threadError;
 
   const composer = (
@@ -312,7 +314,11 @@ export function Workspace() {
         <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto">
           {showEmpty ? (
             <div className="flex min-h-full flex-col justify-center px-5 py-12 sm:px-10">
-              <EmptyState composer={composer} onPick={pickSuggestion} />
+              <EmptyState
+                composer={composer}
+                onPick={pickSuggestion}
+                onOpenExample={example ? () => leaveFor(`/c/${example.id}`) : null}
+              />
             </div>
           ) : (
             <div className="mx-auto w-full max-w-3xl px-5 pt-8 pb-16 sm:px-8">
@@ -335,6 +341,15 @@ export function Workspace() {
                     Coba lagi
                   </button>
                 </div>
+              ) : null}
+              {activePinned && !streaming ? (
+                <p className="mb-8 flex items-start gap-2 rounded-xl border border-line bg-subtle px-4 py-3 text-sm leading-5 text-ink-mid">
+                  <Pin size={15} aria-hidden="true" className="mt-0.5 shrink-0 text-accent" />
+                  <span>
+                    <span className="font-medium text-ink">Contoh percakapan.</span> Hanya untuk dilihat. Pertanyaan
+                    yang Anda kirim di bawah akan dimulai sebagai percakapan baru milik Anda.
+                  </span>
+                </p>
               ) : null}
               {messages.length > 0 ? (
                 <MessageList messages={messages} status={status} busy={streaming} onRetry={(question) => void ask(question)} />

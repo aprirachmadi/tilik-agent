@@ -62,6 +62,7 @@ export type ConversationSummary = {
   title: string | null;
   created_at: string;
   updated_at: string;
+  pinned?: boolean;
 };
 
 export type ConversationMessage = {

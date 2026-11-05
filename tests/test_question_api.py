@@ -19,7 +19,7 @@ from tilik_agent.agent.runner import cited_sources, question_result, run_questio
 from tilik_agent.agent.schemas import State
 from tilik_agent.api import VISITOR_COOKIE, app, status_lines
 from tilik_agent.chat.models import Conversation, Message
-from tilik_agent.chat.storage import list_conversations, load_full_thread
+from tilik_agent.chat.storage import SHOWCASE_OWNER, list_conversations, load_full_thread
 from tilik_agent.config import get_agent_config
 from tilik_agent.ingestion.models import Dataset
 
@@ -642,6 +642,32 @@ def test_visitors_only_reach_their_own_conversations(monkeypatch: pytest.MonkeyP
     assert [row["id"] for row in owner.get("/conversations").json()] == [created["conversation_id"]]
     thread = owner.get(f"/conversations/{created['conversation_id']}").json()
     assert [message["role"] for message in thread["messages"]] == ["user", "assistant"]
+
+
+def test_pinned_example_is_readable_by_everyone_and_continued_by_no_one(
+    monkeypatch: pytest.MonkeyPatch, chat_db: Session
+) -> None:
+    """
+    Condition:
+    A showcase conversation exists next to the visitor's own thread.
+
+    Expected:
+    The visitor lists the example first and flagged as pinned, can open it, and gets 404 when continuing it,
+    so the example keeps its original messages.
+    """
+    chat_db.add(Conversation(id="example", owner_id=SHOWCASE_OWNER, title="Contoh"))
+    chat_db.add(Message(conversation_id="example", role="user", content="Contoh pertanyaan"))
+    chat_db.commit()
+    monkeypatch.setattr("tilik_agent.agent.runner.compile_graph", lambda: _WorkspaceGraph())
+    client = _client()
+    own = client.post("/questions", json={"question": "berapa TPT Papua"}).json()
+
+    rows = client.get("/conversations").json()
+    assert [(row["id"], row["pinned"]) for row in rows] == [("example", True), (own["conversation_id"], False)]
+    assert client.get("/conversations/example").status_code == 200
+    follow_up = {"question": "lanjut", "conversation_id": "example"}
+    assert client.post("/questions", json=follow_up).status_code == 404
+    assert len(load_full_thread(chat_db, "example", VISITOR)[1]) == 1
 
 
 @pytest.mark.parametrize("cookie", [None, "not-a-uuid"])

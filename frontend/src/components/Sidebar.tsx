@@ -1,4 +1,4 @@
-import { Plus, Search, X } from "lucide-react";
+import { Pin, Plus, Search, X } from "lucide-react";
 import { useState } from "react";
 import type { ConversationSummary } from "../api/types";
 import { Logo } from "./Logo";
@@ -24,18 +24,21 @@ function groupConversations(conversations: ConversationSummary[]) {
   const today = startOfDay(new Date());
   const previousWeek = today - 7 * DAY_MS;
   const groups: { label: string; items: ConversationSummary[] }[] = [
+    { label: "Contoh", items: [] },
     { label: "Hari ini", items: [] },
     { label: "7 hari terakhir", items: [] },
     { label: "Lebih lama", items: [] },
   ];
   for (const conversation of conversations) {
     const updated = startOfDay(new Date(conversation.updated_at));
-    if (updated >= today) {
+    if (conversation.pinned) {
       groups[0].items.push(conversation);
-    } else if (updated >= previousWeek) {
+    } else if (updated >= today) {
       groups[1].items.push(conversation);
-    } else {
+    } else if (updated >= previousWeek) {
       groups[2].items.push(conversation);
+    } else {
+      groups[3].items.push(conversation);
     }
   }
   return groups.filter((group) => group.items.length > 0);
@@ -146,11 +149,12 @@ export function Sidebar({
                           title={label}
                           aria-current={selected ? "page" : undefined}
                           onClick={() => onSelect(conversation.id)}
-                          className={`block w-full truncate rounded-lg px-3 py-2 text-left text-sm leading-5 transition ${
+                          className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm leading-5 transition ${
                             selected ? "bg-canvas font-medium text-ink shadow-[0_0_0_1px_var(--color-line)]" : "text-ink-mid hover:bg-hover hover:text-ink"
                           }`}
                         >
-                          {label}
+                          {conversation.pinned ? <Pin size={13} aria-label="Contoh" className="shrink-0 text-accent" /> : null}
+                          <span className="truncate">{label}</span>
                         </button>
                       </li>
                     );

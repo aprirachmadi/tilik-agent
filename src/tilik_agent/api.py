@@ -31,6 +31,7 @@ from tilik_agent.agent.schemas import ChatTurn
 from tilik_agent.agent.tracing import current_trace_id
 from tilik_agent.chat.models import Conversation, Message
 from tilik_agent.chat.storage import (
+    SHOWCASE_OWNER,
     ConversationNotFound,
     append_turn,
     conversation_title_from_question,
@@ -113,6 +114,7 @@ class ConversationSummary(BaseModel):
     title: str | None = None
     created_at: datetime
     updated_at: datetime
+    pinned: bool = False
 
 
 class ConversationMessage(BaseModel):
@@ -289,6 +291,7 @@ def _summary(conversation: Conversation) -> ConversationSummary:
         title=conversation.title,
         created_at=conversation.created_at,
         updated_at=conversation.updated_at,
+        pinned=conversation.owner_id == SHOWCASE_OWNER,
     )
 
 

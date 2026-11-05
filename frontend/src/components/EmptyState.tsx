@@ -5,9 +5,10 @@ import { sourceCatalog, type SourceId } from "../suggestions";
 type EmptyStateProps = {
   composer: ReactNode;
   onPick: (question: string, source: SourceId) => void;
+  onOpenExample: (() => void) | null;
 };
 
-export function EmptyState({ composer, onPick }: EmptyStateProps) {
+export function EmptyState({ composer, onPick, onOpenExample }: EmptyStateProps) {
   return (
     <div className="rise mx-auto w-full max-w-4xl">
       <p className="eyebrow">Analis data Indonesia</p>
@@ -16,6 +17,16 @@ export function EmptyState({ composer, onPick }: EmptyStateProps) {
         <span className="block text-ink-muted">Jawaban lengkap dengan sumbernya.</span>
       </h1>
       <div className="mt-10">{composer}</div>
+      {onOpenExample ? (
+        <button
+          type="button"
+          onClick={onOpenExample}
+          className="group mt-4 inline-flex items-center gap-1.5 text-sm font-medium text-ink-mid hover:text-ink"
+        >
+          Belum mau mencoba? Lihat contoh percakapan
+          <ArrowUpRight size={15} aria-hidden="true" className="transition group-hover:-translate-y-px group-hover:translate-x-px" />
+        </button>
+      ) : null}
       <section aria-label="Sumber data dan contoh pertanyaan" className="mt-14 grid border-t border-line sm:grid-cols-3">
         {sourceCatalog.map((source, index) => (
           <div

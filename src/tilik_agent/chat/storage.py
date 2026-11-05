@@ -13,6 +13,9 @@ from tilik_agent.agent.schemas import ChatTurn
 from tilik_agent.chat.models import Conversation, Message
 from tilik_agent.config import get_agent_config
 
+SHOWCASE_OWNER = "showcase"
+"""Owner of the pinned example conversations every visitor can read but nobody can continue."""
+
 
 class ConversationNotFound(LookupError):
     """The conversation does not exist, or belongs to another visitor."""
@@ -88,22 +91,21 @@ def append_turn(
 
 
 def list_conversations(session: Session, owner_id: str) -> list[Conversation]:
-    """Return the visitor's threads, newest activity first."""
-    return list(
-        session.scalars(
-            select(Conversation)
-            .where(Conversation.owner_id == owner_id)
-            .order_by(Conversation.updated_at.desc(), Conversation.created_at.desc())
-        )
+    """Return the pinned examples, then the visitor's threads, each newest activity first."""
+    rows = session.scalars(
+        select(Conversation)
+        .where(Conversation.owner_id.in_([SHOWCASE_OWNER, owner_id]))
+        .order_by(Conversation.updated_at.desc(), Conversation.created_at.desc())
     )
+    return sorted(rows, key=lambda row: row.owner_id != SHOWCASE_OWNER)
 
 
 def load_full_thread(
     session: Session, conversation_id: str, owner_id: str
 ) -> tuple[Conversation, list[Message]] | None:
-    """Return one of the visitor's conversations with every message, or none when it is not theirs."""
-    conversation = owned_conversation(session, conversation_id, owner_id)
-    if conversation is None:
+    """Return one of the visitor's conversations or a pinned example, or none when it is neither."""
+    conversation = session.get(Conversation, conversation_id)
+    if conversation is None or conversation.owner_id not in (owner_id, SHOWCASE_OWNER):
         return None
     messages = list(
         session.scalars(select(Message).where(Message.conversation_id == conversation_id).order_by(Message.id.asc()))
