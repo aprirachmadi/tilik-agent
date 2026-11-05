@@ -21,6 +21,7 @@ from tilik_agent.agent.runner import QuestionResult
 from tilik_agent.agent.schemas import AnswerDraft
 from tilik_agent.agent.workers import route_sources
 from tilik_agent.chat.models import Conversation, Message
+from tilik_agent.connectors import mcp_client
 from tilik_agent.connectors.bmkg.parsing import warning
 from tilik_agent.connectors.bnpb.ingest import parse_rows
 from tilik_agent.connectors.bnpb.models import BnpbFact, BnpbSnapshot
@@ -369,3 +370,51 @@ def test_saved_bmkg_answer_keeps_original_payload(monkeypatch: pytest.MonkeyPatc
     with Session(engine) as session:
         snapshot = session.get(ExternalSourceSnapshot, response.sources[0]["snapshot_id"])
         assert snapshot.content["raw"]["body"] == "original JSON"
+
+
+class _FakeMcpClient:
+    def __init__(self, outcome: object) -> None:
+        self.outcome = outcome
+        self.closed = False
+
+    def call(self, name: str, arguments: dict) -> object:
+        if isinstance(self.outcome, Exception):
+            raise self.outcome
+        return self.outcome
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def test_dead_mcp_session_is_replaced_on_the_same_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    dead = _FakeMcpClient(mcp_client.ConnectorUnavailable("server restarted"))
+    fresh = _FakeMcpClient({"ok": True})
+    clients = iter([fresh])
+    monkeypatch.setattr(mcp_client, "_clients", {"bmkg": dead})
+    monkeypatch.setattr(mcp_client, "LocalMcpClient", lambda _server: next(clients))
+
+    assert mcp_client.call_connector("bmkg", "bmkg_earthquakes", {}) == {"ok": True}
+    assert dead.closed
+    assert mcp_client._clients == {"bmkg": fresh}
+
+
+def test_unreachable_mcp_server_is_retried_on_the_next_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    down = mcp_client.ConnectorUnavailable("connection refused")
+    clients = iter([_FakeMcpClient(down), _FakeMcpClient(down), _FakeMcpClient({"ok": True})])
+    monkeypatch.setattr(mcp_client, "_clients", {})
+    monkeypatch.setattr(mcp_client, "LocalMcpClient", lambda _server: next(clients))
+
+    with pytest.raises(mcp_client.ConnectorUnavailable):
+        mcp_client.call_connector("bmkg", "bmkg_earthquakes", {})
+    assert mcp_client._clients == {}
+    assert mcp_client.call_connector("bmkg", "bmkg_earthquakes", {}) == {"ok": True}
+
+
+def test_mcp_tool_error_keeps_the_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = _FakeMcpClient(RuntimeError("bmkg MCP tool bmkg_forecast failed: Unknown village"))
+    monkeypatch.setattr(mcp_client, "_clients", {"bmkg": client})
+
+    with pytest.raises(RuntimeError, match="Unknown village"):
+        mcp_client.call_connector("bmkg", "bmkg_forecast", {"place": "nowhere"})
+    assert mcp_client._clients == {"bmkg": client}
+    assert not client.closed

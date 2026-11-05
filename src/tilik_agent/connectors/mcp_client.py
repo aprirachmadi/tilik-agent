@@ -8,6 +8,7 @@ import os
 import sys
 import threading
 from concurrent.futures import TimeoutError as FutureTimeout
+from contextlib import suppress
 from typing import Any
 
 from mcp import ClientSession, StdioServerParameters
@@ -37,6 +38,10 @@ _SERVERS = {
 }
 
 
+class ConnectorUnavailable(RuntimeError):
+    """The MCP session could not be used; the tool did not run."""
+
+
 class LocalMcpClient:
     """Keep one MCP session alive across the graph's synchronous tool calls."""
 
@@ -45,6 +50,7 @@ class LocalMcpClient:
         self._ready = threading.Event()
         self._loop: asyncio.AbstractEventLoop | None = None
         self._session: ClientSession | None = None
+        self._stop: asyncio.Event | None = None
         self._error: BaseException | None = None
         threading.Thread(target=self._run, name=f"tilik-{server}-mcp", daemon=True).start()
 
@@ -77,18 +83,25 @@ class LocalMcpClient:
             await session.initialize()
             self._loop = asyncio.get_running_loop()
             self._session = session
+            self._stop = asyncio.Event()
             self._ready.set()
-            await asyncio.Event().wait()
+            await self._stop.wait()
+
+    def close(self) -> None:
+        """End the session and its transport; a closed or failed loop needs nothing."""
+        if self._loop is not None and self._stop is not None:
+            with suppress(RuntimeError):
+                self._loop.call_soon_threadsafe(self._stop.set)
 
     def call(self, name: str, arguments: dict[str, Any], *, timeout: float = 45) -> Any:
         if name not in _SERVERS[self._server][1]:
             raise ValueError(f"Unapproved {self._server} MCP tool: {name}")
         if not self._ready.wait(timeout=timeout):
-            raise TimeoutError(f"{self._server} MCP server did not start")
+            raise ConnectorUnavailable(f"{self._server} MCP server did not start")
         if self._error is not None:
-            raise RuntimeError(f"{self._server} MCP server failed: {self._error}") from self._error
+            raise ConnectorUnavailable(f"{self._server} MCP server failed: {self._error}") from self._error
         if self._loop is None or self._session is None:
-            raise RuntimeError(f"{self._server} MCP session is unavailable")
+            raise ConnectorUnavailable(f"{self._server} MCP session is unavailable")
         future = asyncio.run_coroutine_threadsafe(self._session.call_tool(name, arguments=arguments), self._loop)
         try:
             result = future.result(timeout=timeout)
@@ -96,7 +109,7 @@ class LocalMcpClient:
             future.cancel()
             raise TimeoutError(f"{self._server} MCP tool {name} timed out") from exc
         except Exception as exc:
-            raise RuntimeError(f"{self._server} MCP tool {name} could not complete: {exc}") from exc
+            raise ConnectorUnavailable(f"{self._server} MCP tool {name} could not complete: {exc}") from exc
         if result.isError:
             message = "; ".join(getattr(item, "text", "") for item in result.content)
             raise RuntimeError(f"{self._server} MCP tool {name} failed: {message[:500]}")
@@ -115,14 +128,33 @@ _clients: dict[str, LocalMcpClient] = {}
 _lock = threading.Lock()
 
 
-def call_connector(server: str, name: str, arguments: dict[str, Any]) -> Any:
-    if server not in _SERVERS:
-        raise ValueError(f"Unknown connector: {server}")
+def _client(server: str) -> LocalMcpClient:
     with _lock:
         if server not in _clients:
             _clients[server] = LocalMcpClient(server)
-        client = _clients[server]
-    return client.call(name, arguments)
+        return _clients[server]
+
+
+def _discard(server: str, client: LocalMcpClient) -> None:
+    with _lock:
+        if _clients.get(server) is client:
+            del _clients[server]
+    client.close()
+
+
+def call_connector(server: str, name: str, arguments: dict[str, Any]) -> Any:
+    """Call a tool, reconnecting once if the cached session died (e.g. the server restarted)."""
+    if server not in _SERVERS:
+        raise ValueError(f"Unknown connector: {server}")
+    for attempt in range(2):
+        client = _client(server)
+        try:
+            return client.call(name, arguments)
+        except ConnectorUnavailable:
+            _discard(server, client)
+            if attempt:
+                raise
+    raise AssertionError("unreachable")
 
 
 def call_bps(name: str, arguments: dict[str, Any]) -> Any:
