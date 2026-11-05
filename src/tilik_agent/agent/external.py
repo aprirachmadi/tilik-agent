@@ -61,7 +61,8 @@ geography_level=national|province|district, geography_name exact name if
 province/district, disaster_type exact Indonesian type if national,
 start_year/end_year between 2010 and 2024. Province and district tables count
 all disaster types. National tables are by disaster type. Never ask for a
-province-by-type combination.
+province-by-type combination. To compare two national disaster types, make one
+call per type with the same years.
 BMKG tools: bmkg_forecast(place) accepts Kemayoran or a verified adm4 code;
 bmkg_earthquakes(feed=latest|recent|felt); bmkg_active_warnings(area optional).
 Do not invent an adm4 code. If an unsupported location is requested, call
@@ -79,6 +80,12 @@ Question: {state['question']}"""
         else:
             try:
                 arguments = dict(call.arguments)
+                intent = state["intent"]
+                if call.connector == "bnpb" and intent.get("analysis_operation"):
+                    # Statistics must cover exactly the requested years, whatever range the planner chose.
+                    for key in ("start_year", "end_year"):
+                        if intent.get(key):
+                            arguments[key] = intent[key]
                 if call.connector == "bmkg" and call.tool == "bmkg_earthquakes":
                     requested_feed = _earthquake_feed_for(state["question"])
                     if requested_feed:

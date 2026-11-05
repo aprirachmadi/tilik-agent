@@ -30,13 +30,16 @@ forecasts, earthquakes and active weather alerts. For BPS use source_route=data
 for tables, context for publication, both for both. For other sources use data.
 Use direct only when no lookup is needed. Never interpret a historical BNPB
 count as a current BMKG forecast or a causal relationship.
-Statistical analysis_operation applies only to BPS-only questions. A BPS+BNPB
-comparison may place validated 2024 province values side by side, but does not
-run correlation or regression.
+Statistical analysis_operation applies to BPS province tables and to BNPB
+national series by disaster type across years. A BPS+BNPB comparison may place
+validated 2024 province values side by side, but does not run correlation or
+regression.
 For province dispersion over time choose analysis_operation=dispersion; for
 relationship choose correlation, fitted models/outliers choose ols, initial
 level versus change choose convergence, and paired survey rounds choose
-paired_compare. Otherwise use null. Statistical analysis requires SQL data.
+paired_compare. For a BNPB yearly trend, its strength, or years that deviate
+from it choose ols; for how two BNPB disaster types move together across years
+choose correlation. Otherwise use null. BPS analysis requires SQL data.
 Extract the indicator without inventing a dataset ID. Preserve exact years.
 For 'since 2017' set start_year=2017 and through_latest=true; do not guess
 the latest available year. Do not request a chart for a direct answer.
@@ -55,6 +58,8 @@ Resolve follow-ups into a standalone question using the recent conversation.
             standalone_years = {int(value) for value in re.findall(r"(?<!\d)(?:19|20)\d{2}(?!\d)", intent.question)}
             if years - standalone_years:
                 raise ValueError("Standalone question lost an explicit user year")
+            # A follow-up such as "the same period" names no year; its standalone question carries them.
+            years = years or standalone_years
             lowered = original.casefold()
             if "menyempit sejak" in lowered and intent.analysis_operation != "dispersion":
                 raise ValueError("Province gap over time requires dispersion analysis")

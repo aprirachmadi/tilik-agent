@@ -176,6 +176,7 @@ def cited_sources(state: State) -> list[dict[str, Any]]:
         seen_documents.add(key)
         sources.append({"kind": "document", "document_id": key})
     cited_external = set(state.get("answer_external_ids") or [])
+    seen_external: set[tuple[Any, ...]] = set()
     for item in state.get("external_evidence") or []:
         if item["id"] not in cited_external or "data" not in item:
             continue
@@ -191,6 +192,12 @@ def cited_sources(state: State) -> list[dict[str, Any]]:
         elif len(warnings) == 1:
             data_time = warnings[0].get("sent")
         source_url = warnings[0].get("source_url") if len(warnings) == 1 else data.get("source_url")
+        url = _trusted_source_url(data.get("provider", item["provider"]), source_url)
+        # Two series read from one table over the same years are a single citation.
+        key = (data.get("provider", item["provider"]), url, data.get("title"), data_time)
+        if data.get("provider") == "BNPB" and key in seen_external:
+            continue
+        seen_external.add(key)
         title = data.get("title") or {
             "forecast": "Prakiraan cuaca", "earthquakes": "Gempabumi", "warnings": "Peringatan dini cuaca"
         }.get(data.get("kind"), "Source data")
@@ -198,7 +205,7 @@ def cited_sources(state: State) -> list[dict[str, Any]]:
             "kind": "external", "provider": data.get("provider", item["provider"]),
             "evidence_id": item["id"],
             "title": title,
-            "url": _trusted_source_url(data.get("provider", item["provider"]), source_url),
+            "url": url,
             "source_id": data.get("resource_id") or data.get("source_id"),
             "retrieved_at": data.get("retrieved_at"), "data_time": data_time,
             "expires_at": warnings[0].get("expires") if len(warnings) == 1 else None,

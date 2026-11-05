@@ -71,6 +71,21 @@ def _resolve_rows(rows: list[tuple], names: dict[str, str]) -> dict[str, dict[st
     return dict(panel)
 
 
+def _pin_error(axes: list[tuple], pinned_axes: list[int]) -> str:
+    """Name the axes a selection must fix, so the caller can correct its member IDs."""
+    problems = []
+    for axis_id, kind, label in axes:
+        count = pinned_axes.count(axis_id)
+        if kind == "geography" and count:
+            problems.append(f"unpin geography axis '{label}' (dimension {axis_id})")
+        elif kind != "geography" and count == 0:
+            problems.append(f"pin one member of '{label}' (dimension {axis_id})")
+        elif kind != "geography" and count > 1:
+            problems.append(f"pin only one member of '{label}' (dimension {axis_id}), not {count}")
+    detail = "; ".join(problems) or "the dataset needs exactly one geography axis"
+    return f"Pin exactly one member on every non-geography axis; leave geography unpinned. Fix: {detail}"
+
+
 def create_selection(dataset_id: int, measure_id: int, period_ids: list[int], member_ids: list[int]) -> dict[str, Any]:
     """Validate a complete query specification without exposing its rows to the model."""
     if not period_ids or len(period_ids) != len(set(period_ids)) or len(period_ids) > 40:
@@ -92,7 +107,7 @@ def create_selection(dataset_id: int, measure_id: int, period_ids: list[int], me
                 (dataset_id, period_ids),
             ).fetchall()
             axes = conn.execute(
-                "SELECT id, dimension_type FROM dimension WHERE dataset_id=%s", (dataset_id,)
+                "SELECT id, dimension_type, original_label FROM dimension WHERE dataset_id=%s", (dataset_id,)
             ).fetchall()
             members = conn.execute(
                 """SELECT dm.id, d.id FROM dimension_member dm JOIN dimension d ON d.id=dm.dimension_id
@@ -106,10 +121,10 @@ def create_selection(dataset_id: int, measure_id: int, period_ids: list[int], me
             if len(members) != len(member_ids):
                 return {"error": "Member ID does not belong to dataset"}
             pinned_axes = [axis_id for _, axis_id in members]
-            non_geo = {axis_id for axis_id, kind in axes if kind != "geography"}
-            geo_axes = {axis_id for axis_id, kind in axes if kind == "geography"}
+            non_geo = {axis_id for axis_id, kind, _ in axes if kind != "geography"}
+            geo_axes = {axis_id for axis_id, kind, _ in axes if kind == "geography"}
             if len(geo_axes) != 1 or set(pinned_axes) != non_geo or len(pinned_axes) != len(non_geo):
-                return {"error": "Pin exactly one member on every non-geography axis; leave geography unpinned"}
+                return {"error": _pin_error(axes, pinned_axes)}
             rows = _rows(conn, dataset_id, measure_id, period_ids, member_ids)
             names = _known_provinces(conn)
         panel = _resolve_rows(rows, names)
@@ -302,6 +317,68 @@ def compute(
         result_id="res_" + hashlib.sha256(result_key.encode()).hexdigest()[:12],
         operation=request.operation,
         selection_ids=request.selection_ids,
+        statistics=stats,
+        input_observation_ids=ids,
+        notes=notes,
+    )
+
+
+def year_series_result(operation: str, series: list[dict[str, Any]], *, top_k: int = 3) -> AnalysisResult:
+    """Trend and relationship statistics over national BNPB series, paired by year.
+
+    Each series is {"id", "label", "unit", "rows": [{"fact_id", "year", "value"}]}. With one
+    series, ols fits the yearly trend; with two, correlation and ols compare them year by year.
+    """
+    if operation not in {"correlation", "ols"}:
+        raise ValueError(f"{operation} needs province panels; BNPB year series support correlation and ols")
+    panels = [
+        {
+            int(row["year"]): (int(row["fact_id"]), float(row["value"]))
+            for row in item["rows"]
+            if row.get("value") is not None
+        }
+        for item in series
+    ]
+    notes = ["BNPB counts recorded events; changes in reporting coverage can affect trends."]
+    if operation == "ols" and len(series) == 1:
+        years = sorted(panels[0])
+        x, y = [float(year) for year in years], [panels[0][year][1] for year in years]
+        labels = ["year", series[0]["label"]]
+    else:
+        if len(series) != 2:
+            raise ValueError(f"{operation} needs two BNPB series over the same years")
+        years = sorted(set(panels[0]) & set(panels[1]))
+        x, y = [panels[0][year][1] for year in years], [panels[1][year][1] for year in years]
+        labels = [series[0]["label"], series[1]["label"]]
+        notes.append("Moving together across years does not show that one disaster type causes the other.")
+    if len(years) < 3:
+        raise ValueError("At least three matched years are required")
+    stats: dict[str, Any] = {
+        "paired_by": "year",
+        "x": labels[0],
+        "y": labels[1],
+        "first_year": years[0],
+        "last_year": years[-1],
+        "n": len(years),
+        "pearson_r": _pearson(x, y),
+        "spearman_rho": _pearson(_ranks(x), _ranks(y)),
+    }
+    if operation == "ols":
+        slope, intercept, r2 = _ols(x, y)
+        fitted = [intercept + slope * value for value in x]
+        stats.update({"slope": slope, "intercept": intercept, "r_squared": r2})
+        stats["top_residuals"] = [
+            {"year": year, "actual": actual, "fitted": round(estimate, 1), "residual": round(actual - estimate, 1)}
+            for year, actual, estimate in sorted(
+                zip(years, y, fitted, strict=True), key=lambda row: abs(row[1] - row[2]), reverse=True
+            )[:top_k]
+        ]
+    ids = sorted(panel[year][0] for panel in panels for year in years if year in panel)
+    key = f"{operation}:{[item['id'] for item in series]}:{','.join(map(str, ids))}"
+    return AnalysisResult(
+        result_id="res_" + hashlib.sha256(key.encode()).hexdigest()[:12],
+        operation=operation,
+        selection_ids=[item["id"] for item in series],
         statistics=stats,
         input_observation_ids=ids,
         notes=notes,

@@ -6,7 +6,7 @@ import pytest
 
 from tilik_agent.agent.geography import province_code, province_names
 from tilik_agent.agent.schemas import AnalysisRequest, RequestIntent, SeriesSelection
-from tilik_agent.agent.statistics import _resolve_rows, compute
+from tilik_agent.agent.statistics import _pin_error, _resolve_rows, compute
 from tilik_agent.agent.workers import interpret_request
 
 
@@ -155,3 +155,15 @@ def test_interpreter_rejects_lost_explicit_year(monkeypatch: pytest.MonkeyPatch)
     result = interpret_request({"question": "Apakah kesenjangan menyempit sejak 2017?"})
     assert "plan_error" in result
     assert "lost an explicit user year" in result["plan_error"]
+
+
+def test_pin_error_names_each_axis_to_fix() -> None:
+    axes = [
+        (443, "geography", "38 Provinsi"),
+        (444, "generic_category", "Karakteristik"),
+        (445, "time_subperiod", "Turunan Tahun"),
+    ]
+    message = _pin_error(axes, [443, 444, 444])
+    assert "unpin geography axis '38 Provinsi' (dimension 443)" in message
+    assert "pin only one member of 'Karakteristik' (dimension 444), not 2" in message
+    assert "pin one member of 'Turunan Tahun' (dimension 445)" in message

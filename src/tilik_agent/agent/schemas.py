@@ -30,8 +30,9 @@ class RequestIntent(BaseModel):
     def validate_route(self) -> RequestIntent:
         if len(self.connectors) != len(set(self.connectors)) or len(self.connectors) > 2:
             raise ValueError("Choose one or two distinct connectors")
-        if self.analysis_operation and self.connectors != ["bps"]:
-            raise ValueError("Statistical operations currently use BPS series only")
+        bnpb_years = self.connectors == ["bnpb"] and self.analysis_operation in {"correlation", "ols"}
+        if self.analysis_operation and self.connectors != ["bps"] and not bnpb_years:
+            raise ValueError("Statistical operations use BPS series, or BNPB national series for correlation and ols")
         if self.analysis_operation and self.source_route not in {"data", "both"}:
             raise ValueError("Statistical analysis needs SQL data")
         if self.source_route == "direct" and self.requested_chart:

@@ -10,7 +10,7 @@ from pydantic import ValidationError
 
 from tilik_agent.agent.runtime import model_json
 from tilik_agent.agent.schemas import AnalysisRequest, RequestIntent, SeriesSelection, State
-from tilik_agent.agent.statistics import compute
+from tilik_agent.agent.statistics import compute, year_series_result
 from tilik_agent.connectors.bps_tools import available_years
 from tilik_agent.connectors.bps_tools import load_series as load_bps_series
 
@@ -34,6 +34,19 @@ def selection_time_error(intent: RequestIntent, selection: SeriesSelection) -> s
     return ""
 
 
+def bnpb_year_series(state: State) -> list[dict[str, Any]]:
+    """National BNPB series fetched for this question, each one disaster type over several years."""
+    series = []
+    for item in state.get("external_evidence", []):
+        data = item.get("data") or {}
+        rows = [row for row in data.get("rows", []) if row.get("value") is not None]
+        if data.get("provider") != "BNPB" or data.get("geography_level") != "national" or len(rows) < 3:
+            continue
+        label = f"{(data.get('disaster_type') or 'bencana').title()} ({data.get('unit')})"
+        series.append({"id": item["id"], "label": label, "unit": data.get("unit"), "rows": rows})
+    return series
+
+
 def route_after_sources(state: State) -> Literal["analyze_data", "write_answer"]:
     intent = RequestIntent.model_validate(state["intent"])
     return "analyze_data" if intent.analysis_operation else "write_answer"
@@ -44,6 +57,17 @@ def analyze_data(state: State) -> dict[str, Any]:
         intent = RequestIntent.model_validate(state["intent"])
         if not intent.analysis_operation:
             raise ValueError("No statistical operation requested")
+        bnpb = bnpb_year_series(state)
+        if bnpb and not state.get("series_selections"):
+            result = year_series_result(intent.analysis_operation, bnpb[:2])
+            return {
+                "analysis_results": [result.model_dump()],
+                "analysis_error": "",
+                "step_status": {
+                    **state.get("step_status", {}),
+                    "analysis": {"action": "analyze_data", "status": "succeeded", "error": "", "evidence_count": 1},
+                },
+            }
         selections = [SeriesSelection.model_validate(item) for item in state.get("series_selections", [])]
         required = 1 if intent.analysis_operation in {"dispersion", "convergence"} else 2
         if len(selections) < required:

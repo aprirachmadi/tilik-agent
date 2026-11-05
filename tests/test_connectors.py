@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 
 import pytest
 from sqlalchemy import create_engine
@@ -418,3 +419,103 @@ def test_mcp_tool_error_keeps_the_session(monkeypatch: pytest.MonkeyPatch) -> No
         mcp_client.call_connector("bmkg", "bmkg_forecast", {"place": "nowhere"})
     assert mcp_client._clients == {"bmkg": client}
     assert not client.closed
+
+
+def _bnpb_national(item_id: str, disaster_type: str, values: dict[int, int], first_fact: int) -> dict:
+    return {"id": item_id, "provider": "BNPB", "data": {
+        "provider": "BNPB", "title": "Jumlah Kejadian Bencana Menurut Jenis Bencana", "measure": "events",
+        "unit": "events", "geography_level": "national", "disaster_type": disaster_type,
+        "rows": [
+            {"fact_id": first_fact + index, "year": year, "geography_name": "Indonesia",
+             "disaster_type": disaster_type, "value": value}
+            for index, (year, value) in enumerate(values.items())
+        ],
+    }}
+
+
+def test_bnpb_trend_and_correlation_pair_by_year() -> None:
+    from tilik_agent.agent.statistics import year_series_result
+
+    flood = _bnpb_national("ext1", "BANJIR", {2020: 100, 2021: 120, 2022: 140, 2023: 200}, 1)["data"]
+    slide = _bnpb_national("ext2", "TANAH LONGSOR", {2021: 60, 2022: 70, 2023: 90, 2024: 95}, 10)["data"]
+    trend = year_series_result("ols", [{"id": "ext1", "label": "Banjir", "unit": "events", "rows": flood["rows"]}])
+    assert trend.statistics["slope"] == pytest.approx(32.0)
+    assert trend.statistics["top_residuals"][0]["year"] == 2022
+    pair = year_series_result("correlation", [
+        {"id": "ext1", "label": "Banjir", "unit": "events", "rows": flood["rows"]},
+        {"id": "ext2", "label": "Longsor", "unit": "events", "rows": slide["rows"]},
+    ])
+    assert (pair.statistics["n"], pair.statistics["first_year"], pair.statistics["last_year"]) == (3, 2021, 2023)
+    assert pair.selection_ids == ["ext1", "ext2"]
+    with pytest.raises(ValueError, match="province panels"):
+        year_series_result("dispersion", [{"id": "ext1", "label": "Banjir", "unit": "events", "rows": flood["rows"]}])
+
+
+def test_bnpb_analysis_runs_and_its_rounded_statistics_pass_the_number_check() -> None:
+    from tilik_agent.agent.analysis import analyze_data
+
+    state = {
+        "question": "Seberapa kuat tren banjir?",
+        "intent": {"question": "Seberapa kuat tren banjir?", "source_route": "data", "connectors": ["bnpb"],
+                   "analysis_operation": "ols"},
+        "external_evidence": [_bnpb_national("ext1", "BANJIR", {2020: 100, 2021: 120, 2022: 140, 2023: 200}, 1)],
+    }
+    result = analyze_data(state)
+    assert result["analysis_error"] == ""
+    state.update(result)
+    _check_bnpb_numbers("Rata-rata naik 32 kejadian per tahun, R² 0,91.", state, ["ext1"])
+    with pytest.raises(ValueError, match="Unsupported numeric claim"):
+        _check_bnpb_numbers("Rata-rata naik 47 kejadian per tahun.", state, ["ext1"])
+
+
+def test_analysis_over_two_bnpb_series_cites_both_when_the_model_omits_ids(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "tilik_agent.agent.answer.model_json", lambda *_: AnswerDraft(text="Hubungannya sedang.", external_ids=[])
+    )
+    result = write_answer({
+        "question": "Apakah banjir dan longsor bergerak bersama?",
+        "external_evidence": [
+            _bnpb_national("ext1", "BANJIR", {2022: 140, 2023: 200, 2024: 180}, 1),
+            _bnpb_national("ext2", "TANAH LONGSOR", {2022: 70, 2023: 90, 2024: 95}, 10),
+        ],
+        "analysis_results": [{"selection_ids": ["ext1", "ext2"], "statistics": {"pearson_r": 0.5}}],
+    })
+    assert result["answer"] == "Hubungannya sedang."
+    assert result["answer_external_ids"] == ["ext1", "ext2"]
+
+
+def test_bnpb_analysis_fetch_uses_the_requested_years(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = []
+    monkeypatch.setattr("tilik_agent.agent.external.model_json", lambda *_: ExternalPlan(calls=[
+        ExternalCall(connector="bnpb", tool="bnpb_query_series",
+                     arguments={"disaster_type": "BANJIR", "start_year": 2010, "end_year": 2024}),
+    ]))
+    monkeypatch.setattr(
+        "tilik_agent.agent.external.call_connector",
+        lambda connector, tool, arguments: calls.append(arguments) or {"provider": "BNPB", "rows": []},
+    )
+    fetch_external({"question": "Banjir dan longsor pada periode yang sama", "intent": {
+        "connectors": ["bnpb"], "analysis_operation": "correlation", "start_year": 2015, "end_year": 2024,
+    }})
+    assert (calls[0]["start_year"], calls[0]["end_year"]) == (2015, 2024)
+
+
+def test_decimal_with_leading_zero_is_not_read_as_thousands() -> None:
+    from tilik_agent.agent.answer import _number_values
+
+    assert _number_values("0,079") == [Decimal("0.079")]
+    assert _number_values("1.794") == [Decimal("1794")]
+    assert _number_values("1.307,7") == [Decimal("1307.7")]
+
+
+def test_two_series_from_one_bnpb_table_are_cited_once() -> None:
+    from tilik_agent.agent.runner import cited_sources
+
+    sources = cited_sources({
+        "answer_external_ids": ["ext1", "ext2"],
+        "external_evidence": [
+            _bnpb_national("ext1", "BANJIR", {2022: 140, 2023: 200}, 1),
+            _bnpb_national("ext2", "TANAH LONGSOR", {2022: 70, 2023: 90}, 10),
+        ],
+    })
+    assert len([source for source in sources if source["kind"] == "external"]) == 1

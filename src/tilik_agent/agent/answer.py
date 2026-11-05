@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
@@ -120,10 +121,10 @@ def validate_analysis(
 
 
 def chart_needed(state: State) -> Literal["yes", "no"]:
-    if state.get("analysis_results"):
-        return "no"
     rows = _answer_observation_rows(state)
-    if not rows and state.get("requested_chart"):
+    if state.get("analysis_results") and rows:
+        return "no"
+    if not rows and (state.get("requested_chart") or state.get("analysis_results")):
         cited = set(state.get("answer_external_ids") or [])
         return "yes" if any(
             item["id"] in cited and item.get("data", {}).get("provider") == "BNPB"
@@ -163,35 +164,43 @@ Rows: {compact_json(evidence_rows(rows))}"""
         return {"chart": None, "chart_error": f"Chart unavailable: {exc}"}
 
 
+_BNPB_UNITS = {"events": ("Jumlah kejadian", "kejadian"), "people": ("Jumlah orang terdampak", "jiwa")}
+
+
 def _build_bnpb_chart(state: State) -> dict[str, Any]:
     cited = set(state.get("answer_external_ids") or [])
-    for item in state.get("external_evidence", []):
-        if item["id"] not in cited:
-            continue
-        data = item.get("data") or {}
-        if data.get("provider") != "BNPB":
-            continue
-        rows = [row for row in data.get("rows", []) if row.get("value") is not None]
-        if len(rows) < 2 or len(rows) > 60:
-            return {"chart": None, "chart_error": "BNPB chart needs 2–60 published values"}
-        years = {row["year"] for row in rows}
-        points = []
-        for row in rows:
-            label = str(row["year"]) if len(years) > 1 else (row.get("geography_name") or row.get("disaster_type"))
-            points.append({
-                "label": label,
-                "series": (row.get("disaster_type") or row.get("geography_name"))
-                if len(years) > 1 else data["measure"],
-                "value": row["value"], "unit": data.get("unit"), "observation_id": row["fact_id"],
-            })
-        return {"chart": ChartSpec(
-            type="line" if len(years) > 1 else "bar",
-            title=data.get("title") or "BNPB disaster series",
-            x_axis="Year" if len(years) > 1 else "Place or type",
-            y_axis=data.get("unit") or "Value",
-            data=points,
-        ).model_dump()}
-    return {"chart": None, "chart_error": "No BNPB values available for a chart"}
+    sources = [
+        item["data"] for item in state.get("external_evidence", [])
+        if item["id"] in cited and (item.get("data") or {}).get("provider") == "BNPB"
+    ]
+    if not sources:
+        return {"chart": None, "chart_error": "No BNPB values available for a chart"}
+    if len({data.get("unit") for data in sources}) > 1:
+        sources = sources[:1]
+    rows = [row for data in sources for row in data.get("rows", []) if row.get("value") is not None]
+    if len(rows) < 2 or len(rows) > 60:
+        return {"chart": None, "chart_error": "BNPB chart needs 2–60 published values"}
+    years = {row["year"] for row in rows}
+    axis, unit = _BNPB_UNITS.get(sources[0].get("unit"), ("Nilai", sources[0].get("unit")))
+    points = []
+    for row in rows:
+        name = (row.get("disaster_type") or row.get("geography_name") or "").title()
+        points.append({
+            "label": str(row["year"]) if len(years) > 1 else name,
+            "series": name if len(years) > 1 else axis,
+            "value": row["value"], "unit": unit, "observation_id": row["fact_id"],
+        })
+    series = sorted({point["series"] for point in points})
+    title = sources[0].get("title") or "Data bencana BNPB"
+    if len(years) > 1:
+        title = f"{' dan '.join(series)} nasional, {min(years)}–{max(years)}"
+    return {"chart": ChartSpec(
+        type="line" if len(years) > 1 else "bar",
+        title=title,
+        x_axis="Tahun" if len(years) > 1 else "Wilayah atau jenis",
+        y_axis=axis,
+        data=points,
+    ).model_dump()}
 
 
 def display_chart_spec(chart: dict[str, Any] | None) -> None:
@@ -239,11 +248,12 @@ def _external_prompt_evidence(state: State) -> list[dict[str, Any]]:
 
 
 def _number(token: str) -> Decimal:
-    if re.fullmatch(r"\d{1,3}(?:[.,]\d{3})+", token):
+    # A thousands group never starts with 0, so "0,079" is a decimal, not 79.
+    if re.fullmatch(r"[1-9]\d{0,2}(?:[.,]\d{3})+", token):
         return Decimal(token.replace(".", "").replace(",", ""))
-    if re.fullmatch(r"\d{1,3}(?:\.\d{3})+,\d+", token):
+    if re.fullmatch(r"[1-9]\d{0,2}(?:\.\d{3})+,\d+", token):
         return Decimal(token.replace(".", "").replace(",", "."))
-    if re.fullmatch(r"\d{1,3}(?:,\d{3})+\.\d+", token):
+    if re.fullmatch(r"[1-9]\d{0,2}(?:,\d{3})+\.\d+", token):
         return Decimal(token.replace(",", ""))
     return Decimal(token.replace(",", "."))
 
@@ -307,13 +317,35 @@ def _external_number_support(state: State, external_ids: list[str]) -> set[Decim
     return allowed
 
 
+def _analysis_number_support(state: State) -> set[Decimal]:
+    """Computed statistics, at the precisions an answer may round them to."""
+    allowed: set[Decimal] = set()
+
+    def walk(value: Any) -> None:
+        if isinstance(value, dict):
+            for item in value.values():
+                walk(item)
+        elif isinstance(value, list):
+            for item in value:
+                walk(item)
+        elif isinstance(value, int | float) and not isinstance(value, bool) and math.isfinite(value):
+            for scaled in (value, value * 100) if abs(value) <= 1 else (value,):
+                for digits in range(4):
+                    allowed.add(abs(Decimal(str(round(scaled, digits)))))
+                    allowed.add(abs(Decimal(str(math.trunc(scaled * 10**digits) / 10**digits))))
+
+    for item in state.get("analysis_results", []):
+        walk(item.get("statistics"))
+    return allowed
+
+
 def _check_bnpb_numbers(text: str, state: State, external_ids: list[str]) -> None:
     if not any(
         item["id"] in external_ids and item.get("data", {}).get("provider") == "BNPB"
         for item in state.get("external_evidence", [])
     ):
         return
-    allowed = _external_number_support(state, external_ids)
+    allowed = _external_number_support(state, external_ids) | _analysis_number_support(state)
     for token in re.findall(r"(?<!\w)\d+(?:[.,]\d+)*(?!\w)", text):
         if any((value >= 10 or "." in token or "," in token) and value not in allowed
                for value in _number_values(token)):
@@ -424,6 +456,12 @@ def write_answer(state: State) -> dict[str, Any]:
             if len(known_external) == 1:
                 # The sole fetched source has an unambiguous provenance ID.
                 external_ids = list(known_external)
+            elif not external_ids and state.get("analysis_results"):
+                # A statistic over external series is backed by exactly the series it was computed from.
+                external_ids = sorted(
+                    {item_id for item in state["analysis_results"] for item_id in item["selection_ids"]}
+                    & known_external
+                )
         if (set(observation_ids) - known_rows or set(document_ids) - known_docs
                 or set(external_ids) - known_external):
             raise ValueError("Answer cites unknown evidence IDs")
