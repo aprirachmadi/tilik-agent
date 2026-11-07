@@ -18,13 +18,13 @@ export const sourceCatalog: SourceInfo[] = [
     id: "bnpb",
     name: "Badan Nasional Penanggulangan Bencana",
     coverage: "Riwayat kejadian dan dampak bencana per tahun, 2010–2024.",
-    questions: ["Bagaimana jumlah kejadian banjir nasional menurut BNPB dari 2019 sampai 2024?"],
+    questions: ["Bagaimana perkembangan jumlah kejadian banjir nasional dari 2019 hingga 2024 menurut BNPB?"],
   },
   {
     id: "bmkg",
     name: "Badan Meteorologi, Klimatologi, dan Geofisika",
     coverage: "Gempa terbaru, prakiraan cuaca tiga hari, dan peringatan dini aktif.",
-    questions: ["Gempa terbaru yang tercatat BMKG di Indonesia", "Apakah ada peringatan dini cuaca aktif untuk Jakarta menurut BMKG?"],
+    questions: ["Kapan dan di mana gempa bumi terbaru terjadi menurut BMKG, dan berapa magnitudonya?", "Apakah saat ini ada peringatan dini cuaca dari BMKG yang masih berlaku untuk wilayah DKI Jakarta?"],
   },
   {
     id: "bapanas",
@@ -36,6 +36,6 @@ export const sourceCatalog: SourceInfo[] = [
     id: "sipongi",
     name: "SiPongi Kementerian Kehutanan",
     coverage: "Titik panas satelit 12–48 jam terakhir dan jumlah bulanan per provinsi sejak 2015.",
-    questions: ["Berapa titik panas yang terdeteksi 24 jam terakhir di Indonesia menurut SiPongi?", "Bagaimana jumlah titik panas Kalimantan Barat per bulan pada 2025 menurut SiPongi?"],
+    questions: ["Berapa jumlah titik panas yang terdeteksi di Indonesia dalam 24 jam terakhir menurut SiPongi?", "Bagaimana perkembangan jumlah titik panas bulanan di Provinsi Kalimantan Barat sepanjang 2025 menurut SiPongi?"],
   },
 ];

@@ -236,7 +236,7 @@ For manual connector acceptance, use the source and limitation cases in
 SiPongi values change live, so their cases check source choice, freshness, and
 wording rather than fixed numbers.
 
-`poetry run tilik benchmark` runs the judges on the whole question file. It answers each question in `src/tilik_agent/evals/datasets/demografi_sosial_questions.json` through the same `run_question` path as the API, then scores the metrics whose `enabled` flag is true under `evals.metrics`. It prints each question as it starts. A Langfuse trace for that question is sent when the agent finishes answering, before the judges run. `POST /questions` and the notebook trace the question and do not call the judges.
+`poetry run tilik benchmark` runs the judges on the whole question file. It answers each question in `src/tilik_agent/evals/datasets/generation_benchmark.json` through the same `run_question` path as the API, then scores the metrics whose `enabled` flag is true under `evals.metrics`. It prints each question as it starts. A Langfuse trace for that question is sent when the agent finishes answering, before the judges run. `POST /questions` and the notebook trace the question and do not call the judges.
 
 To score one question, edit `QUESTION` in `examples/eval_question.py` and run `poetry run python examples/eval_question.py`. It prints the answer and the same scores, and it does not upload a Langfuse dataset run.
 

@@ -14,7 +14,7 @@ def sync_benchmark(client: Any, dataset: BenchmarkDataset) -> list[Any]:
     try:
         client.get_dataset(dataset.name)
     except Exception:
-        client.create_dataset(name=dataset.name, description="Demography and social statistics benchmark")
+        client.create_dataset(name=dataset.name, description="Agent generation benchmark across all data sources")
     created: list[Any] = []
     for item in dataset.items:
         created.append(
@@ -23,7 +23,10 @@ def sync_benchmark(client: Any, dataset: BenchmarkDataset) -> list[Any]:
                 id=item.id,
                 input=item.question,
                 expected_output=item.expected_response,
-                metadata={"benchmark_id": item.id, "version": dataset.version},
+                metadata={
+                    "benchmark_id": item.id, "version": dataset.version,
+                    "difficulty": item.difficulty, "sources": item.sources,
+                },
             )
         )
     _archive_removed(client, dataset)

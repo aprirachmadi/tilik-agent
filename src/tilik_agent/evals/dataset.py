@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from tilik_agent.agent.schemas import ChatTurn
 
-_DATASET_PATH = Path(__file__).parent / "datasets" / "demografi_sosial_questions.json"
+_DATASET_PATH = Path(__file__).parent / "datasets" / "generation_benchmark.json"
 _CONVERSATION_PATH = Path(__file__).parent / "datasets" / "demografi_sosial_conversations.json"
 
 
@@ -20,6 +20,8 @@ class BenchmarkItem(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     id: str = Field(min_length=1)
+    difficulty: Literal["easy", "medium", "hard", "out_of_scope", "jailbreak"] | None = None
+    sources: list[str] = Field(default_factory=list)
     question: str = Field(min_length=1)
     expected_response: str | None = None
 
@@ -91,6 +93,8 @@ class JudgeItem(BaseModel):
     question: str = Field(min_length=1)
     history: list[ChatTurn] = Field(default_factory=list)
     generated_response: str = Field(min_length=1)
+    # Tool name and arguments the agent used; full results stay in the traces file.
+    generated_tool_calls: list[dict[str, Any]] = Field(default_factory=list)
     expected_response: str = Field(min_length=1)
     human_label: HumanLabel
     # Tool name and arguments the agent used; full results stay in the traces file.

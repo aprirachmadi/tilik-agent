@@ -93,21 +93,23 @@ def _metrics(*, argument_correctness: bool = True, pipeline_status: bool = True)
     )
 
 
-def test_benchmark_file_contains_the_notebook_question() -> None:
+def test_benchmark_file_covers_every_source_and_difficulty() -> None:
     """
     Condition:
     The packaged question file is loaded.
 
     Expected:
-    It is the demography and social benchmark, item ids are unique, it includes the notebook question,
+    It is the generation benchmark, item ids are unique, every source and difficulty appears,
     and the age-group regression item carries its ground truth.
     """
     dataset = load_benchmark()
     ids = [item.id for item in dataset.items]
-    assert dataset.name == "demografi-sosial-questions"
+    assert dataset.name == "generation-benchmark"
     assert len(ids) == len(set(ids))
-    assert any("tiga TPT tertinggi" in item.question for item in dataset.items)
-    age_item = next(item for item in dataset.items if item.id == "11")
+    sources = {source for item in dataset.items for source in item.sources}
+    assert sources == {"bps", "bnpb", "bmkg", "bapanas", "sipongi"}
+    assert {item.difficulty for item in dataset.items} == {"easy", "medium", "hard", "out_of_scope", "jailbreak"}
+    age_item = next(item for item in dataset.items if item.id == "M4")
     assert "22.752,6" in (age_item.expected_response or "")
 
 
@@ -285,8 +287,8 @@ def test_sync_upserts_question_ids_and_archives_removals() -> None:
 
     client = _Client()
     created = sync_benchmark(client, dataset)
-    assert created[0].id == "1"
-    assert client.calls[0]["id"] == "1"
+    assert created[0].id == "E1"
+    assert client.calls[0]["id"] == "E1"
     archived = next(call for call in client.calls if call["id"] == "old-question")
     assert getattr(archived["status"], "value", archived["status"]) == "ARCHIVED"
 

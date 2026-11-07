@@ -17,10 +17,10 @@ load_dotenv(ROOT / ".env.local", override=True)
 
 CASES = {
     "bps": "Berapa kepadatan penduduk DKI Jakarta pada 2021 menurut BPS?",
-    "bnpb": "Berapa kejadian banjir di Indonesia pada 2024 menurut BNPB?",
-    "bmkg": "Gempa terbaru yang tercatat BMKG di Indonesia",
+    "bnpb": "Berapa jumlah kejadian banjir di Indonesia sepanjang tahun 2024 menurut data BNPB?",
+    "bmkg": "Kapan dan di mana gempa bumi terbaru terjadi menurut BMKG, dan berapa magnitudonya?",
     "bapanas": "Berapa harga cabai rawit merah hari ini di Jawa Barat menurut Bapanas?",
-    "sipongi": "Berapa titik panas yang terdeteksi 24 jam terakhir di Indonesia menurut SiPongi?",
+    "sipongi": "Berapa jumlah titik panas yang terdeteksi di Indonesia dalam 24 jam terakhir menurut SiPongi?",
 }
 
 

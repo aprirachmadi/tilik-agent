@@ -2,67 +2,67 @@
   "version": "connector-migration-1",
   "cases": [
     {
-      "question": "Berapa kejadian banjir di Indonesia pada 2024 menurut BNPB?",
+      "question": "Berapa jumlah kejadian banjir di Indonesia sepanjang tahun 2024 menurut data BNPB?",
       "sources": ["bnpb"],
       "expect": "National flood events in 2024; cite BNPB and the resource, not a province table."
     },
     {
-      "question": "Berapa total kejadian bencana di Aceh pada 2024?",
+      "question": "Berapa total kejadian bencana di Provinsi Aceh pada 2024 menurut BNPB?",
       "sources": ["bnpb"],
       "expect": "All disaster types for Aceh in 2024; report the published count."
     },
     {
-      "question": "Berapa banjir di Aceh pada 2024?",
+      "question": "Berapa jumlah kejadian banjir di Provinsi Aceh pada 2024 menurut BNPB?",
       "sources": ["bnpb"],
       "expect": "Explain that the reviewed BNPB tables do not provide type by province."
     },
     {
-      "question": "Apakah kejadian bencana di Papua Tengah naik sejak 2010?",
+      "question": "Apakah jumlah kejadian bencana di Provinsi Papua Tengah meningkat sejak 2010?",
       "sources": ["bnpb"],
       "expect": "Withhold a cross-year trend because province boundaries are not validated."
     },
     {
-      "question": "Apa gempa terbaru menurut BMKG?",
+      "question": "Kapan dan di mana gempa bumi terbaru terjadi menurut BMKG, dan berapa magnitudonya?",
       "sources": ["bmkg"],
       "expect": "Use the live latest earthquake feed and display its event and fetch times."
     },
     {
-      "question": "Bagaimana prakiraan cuaca Kemayoran besok?",
+      "question": "Bagaimana prakiraan cuaca untuk Kelurahan Kemayoran, Jakarta Pusat, besok menurut BMKG?",
       "sources": ["bmkg"],
       "expect": "Use the verified Kemayoran adm4, identify the forecast production time, and avoid observed-weather claims."
     },
     {
-      "question": "Apakah ada peringatan dini cuaca aktif untuk Jakarta?",
+      "question": "Apakah saat ini ada peringatan dini cuaca dari BMKG yang masih berlaku untuk wilayah DKI Jakarta?",
       "sources": ["bmkg"],
       "expect": "Use current CAP warnings only, respect expiry, and show the feed or CAP link."
     },
     {
-      "question": "Bandingkan angka BPS untuk Aceh pada 2024 dengan jumlah kejadian bencana BNPB pada tahun yang sama.",
+      "question": "Bandingkan data BPS untuk Provinsi Aceh pada 2024 dengan jumlah kejadian bencana di provinsi tersebut pada tahun yang sama menurut BNPB.",
       "sources": ["bps", "bnpb"],
       "expect": "Ask for a specific BPS indicator if ambiguous; join only confirmed 2024 province codes and do not infer causality."
     },
     {
-      "question": "Ada peringatan BMKG sekarang; bagaimana riwayat banjir nasional BNPB pada 2024?",
+      "question": "Apakah saat ini ada peringatan dini cuaca dari BMKG? Selain itu, bagaimana catatan kejadian banjir nasional pada 2024 menurut BNPB?",
       "sources": ["bmkg", "bnpb"],
       "expect": "Place current warnings beside history without treating either as a forecast of disaster occurrence."
     },
     {
-      "question": "Berapa harga cabai rawit merah hari ini di Jawa Barat menurut Bapanas?",
+      "question": "Berapa harga cabai rawit merah di tingkat konsumen di Provinsi Jawa Barat hari ini menurut Bapanas, dan bagaimana perubahannya dibandingkan hari sebelumnya?",
       "sources": ["bapanas"],
       "expect": "Use the live consumer price for Jawa Barat; give the price, the change from the previous date, and the Jakarta retrieval time."
     },
     {
-      "question": "Bagaimana harga beras premium nasional per bulan sepanjang 2025 menurut Bapanas?",
+      "question": "Bagaimana perkembangan harga rata-rata bulanan beras premium secara nasional sepanjang 2025 menurut Bapanas?",
       "sources": ["bapanas"],
       "expect": "Use synced monthly averages 2025-01 to 2025-12; say they are monthly averages and report the first-to-last change from the summary."
     },
     {
-      "question": "Berapa titik panas yang terdeteksi 24 jam terakhir di Indonesia menurut SiPongi?",
+      "question": "Berapa jumlah titik panas yang terdeteksi di Indonesia dalam 24 jam terakhir menurut SiPongi?",
       "sources": ["sipongi"],
       "expect": "Use the live 24-hour national count; call them hotspots, not fires, and name the satellites and confidence counted."
     },
     {
-      "question": "Apakah titik panas di Kalimantan Barat naik dari 2019 sampai 2025?",
+      "question": "Apakah jumlah titik panas di Provinsi Kalimantan Barat cenderung meningkat dari 2019 hingga 2025?",
       "sources": ["sipongi"],
       "expect": "Use the NASA-MODIS monthly series for Kalimantan Barat; do not combine satellites across years."
     }

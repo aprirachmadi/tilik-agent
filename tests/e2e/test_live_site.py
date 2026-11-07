@@ -18,8 +18,8 @@ BASE_URL = os.getenv("TILIK_E2E_URL", "http://localhost:5173/api").rstrip("/")
 
 QUESTIONS = {
     "bps": "Berapa kepadatan penduduk DKI Jakarta pada 2021 menurut BPS?",
-    "bnpb": "Berapa kejadian banjir di Indonesia pada 2024 menurut BNPB?",
-    "bmkg": "Gempa terbaru yang tercatat BMKG di Indonesia",
+    "bnpb": "Berapa jumlah kejadian banjir di Indonesia sepanjang tahun 2024 menurut data BNPB?",
+    "bmkg": "Kapan dan di mana gempa bumi terbaru terjadi menurut BMKG, dan berapa magnitudonya?",
 }
 
 
