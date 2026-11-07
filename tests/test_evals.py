@@ -442,14 +442,15 @@ def test_conversation_replays_generated_history_and_scores_once(monkeypatch: pyt
     assert "turn 2: lookup failed" in scores[-1].comment
 
 
-def test_conversation_metric_builder_uses_all_sql_tools_and_optional_relevancy() -> None:
+def test_conversation_metric_builder_uses_all_agent_tools_and_optional_relevancy() -> None:
     config = get_agent_config().evals.conversation_metrics.model_copy(deep=True)
     judge = _DummyJudge()
     built = conversation_metrics(config, judge, history_messages=6)
     assert list(built) == ["goal_accuracy", "tool_use", "conversation_completeness"]
-    assert {tool.name for tool in built["tool_use"].available_tools} == {
-        "search_datasets", "describe_dataset", "get_observations", "select_series"
-    }
+    names = {tool.name for tool in built["tool_use"].available_tools}
+    assert {"search_datasets", "describe_dataset", "get_observations", "select_series"} <= names
+    assert {"bnpb_query_series", "bmkg_earthquakes", "bapanas_prices_today", "sipongi_recent_hotspots"} <= names
+    assert not any(name.startswith("bps_") for name in names)
     assert all(tool.description for tool in built["tool_use"].available_tools)
     config.turn_relevancy.enabled = True
     built = conversation_metrics(config, judge, history_messages=6)

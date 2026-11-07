@@ -18,7 +18,7 @@ from deepeval.tracing import trace_manager
 from tilik_agent.agent.graph import compile_graph
 from tilik_agent.agent.runner import QuestionResult, run_question
 from tilik_agent.agent.schemas import ChatTurn
-from tilik_agent.agent.sql import SQL_TOOLS, get_sql_agent
+from tilik_agent.agent.sql import get_sql_agent
 from tilik_agent.agent.tracing import langfuse_configured
 from tilik_agent.config import get_agent_config
 from tilik_agent.evals.dataset import (
@@ -31,10 +31,14 @@ from tilik_agent.evals.dataset import (
 )
 from tilik_agent.evals.judge import AgentJudgeLlm
 from tilik_agent.evals.langfuse_dataset import sync_benchmark, sync_conversations
-from tilik_agent.evals.metrics import argument_correctness_metric, conversation_metrics, task_completion_metric
+from tilik_agent.evals.metrics import (
+    TOOL_DESCRIPTIONS,
+    argument_correctness_metric,
+    conversation_metrics,
+    task_completion_metric,
+)
 from tilik_agent.evals.scores import ItemScore, assemble_scores, format_report, pipeline_status_label
 
-_TOOL_DESCRIPTIONS = {tool.name: tool.description for tool in SQL_TOOLS}
 _Item = TypeVar("_Item")
 
 
@@ -240,7 +244,7 @@ def _argument_score(question: str, handler: CallbackHandler | None, judge: Agent
 def _tools_called(handler: CallbackHandler | None) -> list[Any]:
     trace = _trace(handler)
     calls = (trace.tools_called or []) if trace is not None else []
-    return [call.model_copy(update={"description": _TOOL_DESCRIPTIONS.get(call.name)}) for call in calls]
+    return [call.model_copy(update={"description": TOOL_DESCRIPTIONS.get(call.name)}) for call in calls]
 
 
 def _progress(message: str) -> None:
@@ -273,7 +277,7 @@ def _prune(span: dict[str, Any], nodes: set[str]) -> list[dict[str, Any]]:
     children = [node for child in span.get("children") or [] for node in _prune(child, nodes)]
     span_type, name = span.get("type"), span.get("name")
     if span_type == "tool":
-        fields = {"input": span.get("input"), "output": span.get("output"), "description": _TOOL_DESCRIPTIONS.get(name)}
+        fields = {"input": span.get("input"), "output": span.get("output"), "description": TOOL_DESCRIPTIONS.get(name)}
     elif span_type == "retriever":
         fields = {"input": span.get("input"), "output": span.get("output")}
     elif span_type == "llm":

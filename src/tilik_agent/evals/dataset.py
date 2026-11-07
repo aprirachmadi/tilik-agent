@@ -74,13 +74,12 @@ _JUDGE_PATH = Path(__file__).parent / "datasets" / "judge_benchmark.json"
 
 
 class HumanLabel(BaseModel):
-    """A person's verdict on one frozen answer; ``reviewed`` stays false until a person confirms it."""
+    """A person's verdict on one frozen answer."""
 
     model_config = ConfigDict(extra="forbid")
 
     verdict: Literal["pass", "fail"]
     reason: str = Field(min_length=1)
-    reviewed: bool = False
 
 
 class JudgeItem(BaseModel):
@@ -94,6 +93,8 @@ class JudgeItem(BaseModel):
     generated_response: str = Field(min_length=1)
     expected_response: str = Field(min_length=1)
     human_label: HumanLabel
+    # Tool name and arguments the agent used; full results stay in the traces file.
+    generated_tool_calls: list[dict[str, Any]] = Field(default_factory=list)
     judge_labels: dict[str, Any] = Field(default_factory=dict)
     source: dict[str, Any]
 

@@ -175,3 +175,29 @@ def test_long_sipongi_series_returns_exact_yearly_totals() -> None:
             (2019, 12, True), (2020, 24, True), (2021, 36, True),
         ]
         assert series["summaries"][0]["first_year"] == 2019 and series["summaries"][0]["difference"] == 24
+
+
+def test_connector_call_is_traced_as_a_named_tool_with_its_arguments(monkeypatch: pytest.MonkeyPatch) -> None:
+    from langchain_core.callbacks import BaseCallbackHandler
+
+    from tilik_agent.agent.external import ExternalCall, ExternalPlan, fetch_external
+
+    class Recorder(BaseCallbackHandler):
+        calls: list[tuple[str, dict]] = []
+
+        def on_tool_start(self, serialized, input_str, **kwargs):  # noqa: ANN001, ANN201
+            self.calls.append((serialized["name"], kwargs["inputs"]))
+
+    recorder = Recorder()
+    monkeypatch.setattr("tilik_agent.agent.external.current_callbacks", lambda: [recorder])
+    monkeypatch.setattr("tilik_agent.agent.external.model_json", lambda *_: ExternalPlan(calls=[ExternalCall(
+        connector="sipongi", tool="sipongi_recent_hotspots", arguments={"hours": 24})]))
+    monkeypatch.setattr("tilik_agent.agent.external.call_connector", lambda *_: {
+        "provider": "SiPongi", "kind": "recent_hotspots", "title": "t", "source_url": "https://x",
+        "retrieved_at": "2026-11-07T00:00:00+00:00", "hours": 24, "geography": "Indonesia", "satellite": "all",
+        "confidence": "High, Medium, Low", "total_hotspots": 0, "by_satellite": {}, "by_confidence": {},
+        "by_province": [],
+    })
+    evidence = fetch_external({"question": "Titik panas 24 jam?", "intent": {"connectors": ["sipongi"]}})
+    assert "data" in evidence[0]
+    assert recorder.calls == [("sipongi_recent_hotspots", {"hours": 24})]

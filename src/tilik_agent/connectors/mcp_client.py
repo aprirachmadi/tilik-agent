@@ -162,5 +162,16 @@ def call_connector(server: str, name: str, arguments: dict[str, Any]) -> Any:
     raise AssertionError("unreachable")
 
 
+def tool_descriptions(servers: tuple[str, ...]) -> dict[str, str]:
+    """Each tool's docstring, read from its server module, for judges that grade tool use."""
+    import importlib
+
+    descriptions = {}
+    for module_name, tools in (_SERVERS[server] for server in servers):
+        module = importlib.import_module(module_name)
+        descriptions.update({name: (getattr(module, name).__doc__ or "").strip() for name in tools})
+    return descriptions
+
+
 def call_bps(name: str, arguments: dict[str, Any]) -> Any:
     return call_connector("bps", name, arguments)

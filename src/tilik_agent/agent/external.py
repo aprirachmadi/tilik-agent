@@ -7,10 +7,12 @@ from datetime import datetime, timedelta
 from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
+from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
 from tilik_agent.agent.runtime import model_json
 from tilik_agent.agent.schemas import State
+from tilik_agent.agent.tracing import current_callbacks
 from tilik_agent.connectors.contracts import RESULT_MODELS
 from tilik_agent.connectors.mcp_client import call_connector
 
@@ -35,6 +37,17 @@ _TOOLS = {
     "sipongi": {"sipongi_recent_hotspots", "sipongi_hotspot_series"},
 }
 _SERIES_TOOLS = {"bnpb_query_series", "bapanas_price_series", "sipongi_hotspot_series"}
+_ANY_ARGUMENTS = {"type": "object", "properties": {}, "additionalProperties": True}
+
+
+def _run_tool(connector: str, tool: str, arguments: dict[str, Any]) -> Any:
+    """Call the connector as a named tool, so traces and judges see its name, arguments, and result."""
+    runnable = StructuredTool.from_function(
+        func=lambda **kwargs: call_connector(connector, tool, kwargs),
+        name=tool, description=f"{connector.upper()} source tool {tool}", args_schema=_ANY_ARGUMENTS,
+    )
+    callbacks = current_callbacks()
+    return runnable.invoke(arguments, config={"callbacks": callbacks} if callbacks else None)
 
 
 def _earthquake_feed_for(question: str) -> str | None:
@@ -111,7 +124,7 @@ Question: {state['question']}"""
                     requested_feed = _earthquake_feed_for(state["question"])
                     if requested_feed:
                         arguments["feed"] = requested_feed
-                data = call_connector(call.connector, call.tool, arguments)
+                data = _run_tool(call.connector, call.tool, arguments)
                 if isinstance(data, dict) and "_raw_payload" in data:
                     item["snapshot_payload"] = data.pop("_raw_payload")
                 data = RESULT_MODELS[call.tool].model_validate(data).model_dump(mode="json")

@@ -15,6 +15,12 @@ from deepeval.test_case import ToolCall
 
 from tilik_agent.agent.sql import SQL_TOOLS
 from tilik_agent.config import ConversationMetricsConfig, EvalsMetricsConfig
+from tilik_agent.connectors.mcp_client import tool_descriptions
+
+# Tools the agent itself calls: the BPS SQL tools, and the external source tools run from `run_external`.
+TOOL_DESCRIPTIONS = {tool.name: tool.description for tool in SQL_TOOLS} | tool_descriptions(
+    ("bnpb", "bmkg", "bapanas", "sipongi")
+)
 
 
 def task_completion_metric(
@@ -58,7 +64,7 @@ def conversation_metrics(
         )
     if config.tool_use.enabled:
         metrics["tool_use"] = ToolUseMetric(
-            available_tools=[ToolCall(name=tool.name, description=tool.description) for tool in SQL_TOOLS],
+            available_tools=[ToolCall(name=name, description=text) for name, text in TOOL_DESCRIPTIONS.items()],
             threshold=config.tool_use.threshold,
             model=judge,
             async_mode=False,

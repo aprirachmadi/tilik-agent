@@ -252,6 +252,17 @@ Use `--n-samples 3` with either benchmark mode to run three items, and `--seed 4
 
 Sampling reduces the number of conversations or questions, but each item can still exceed the provider's per-request or per-minute token limits.
 
+`poetry run tilik benchmark --judges` checks the judges themselves against human labels. The agent does not run. `src/tilik_agent/evals/datasets/judge_benchmark.json` holds 33 saved answers from the chat database and Langfuse. Each item has the question, earlier turns, the frozen `generated_response` and `generated_tool_calls`, a hand-written `expected_response`, and a `human_label` (pass or fail, with a reason). The answers stay frozen so a human label always describes the same text. `judge_benchmark_traces.json` beside it holds each item's recorded trajectory and full tool results, which the judges read. For the 25 items recorded before connector calls were traced as tools, the tool calls are rebuilt from the plan saved in the trace.
+
+The command scores every item with `task_completion` and `argument_correctness`, writes the judge labels back into the dataset file, and prints how often each judge agrees with the human label. `argument_correctness` is not counted for an item without tool calls, because it passes such items by default. When Langfuse is configured, the command upserts the `judge-benchmark` dataset. Each item's input holds the question, the generated answer, the tool calls, and the judged trajectory, and the item links to its original trace. The command then publishes a run with `task_completion`, `argument_correctness`, `human_label`, and `*_agrees` scores. Averaged over the run, `*_agrees` is that judge's accuracy. The run metadata records the judge model, temperature, thresholds, DeepEval version, and code commit. `--n-samples` does not apply to this mode.
+
+The judge in `configs/default.yaml` calls Orvix with `OPENAI_API_KEY`, so load `.env.local` first:
+
+```bash
+set -a; . ./.env.local; set +a
+poetry run tilik benchmark --judges
+```
+
 ## Ingest
 
 Ingest writes through `database_url`, built from `POSTGRES_USER`, `POSTGRES_PASSWORD`, and the host settings in `.env`. That role is separate from the read-only `sql_agent` role used by questions.
