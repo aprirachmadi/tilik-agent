@@ -18,7 +18,7 @@ load_dotenv(ROOT / ".env.local", override=True)
 CASES = {
     "bps": "Berapa kepadatan penduduk DKI Jakarta pada 2021 menurut BPS?",
     "bnpb": "Berapa kejadian banjir di Indonesia pada 2024 menurut BNPB?",
-    "bmkg": "Apa gempa terbaru menurut BMKG?",
+    "bmkg": "Gempa terbaru yang tercatat BMKG di Indonesia",
 }
 
 
