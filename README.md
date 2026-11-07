@@ -63,22 +63,17 @@ Open [http://localhost:5173](http://localhost:5173). The dev server proxies `/ap
 
 ## Pipeline
 
-Each question runs through this LangGraph graph (`src/tilik_agent/agent/graph.py`):
+Each question runs through this LangGraph graph (`src/tilik_agent/agent/graph.py`). The chart shows the
+source steps as one, because every source is fetched the same way:
 
 ```mermaid
 flowchart TD
-    Q[Question and recent history] --> IR["interpret_request<br/>LLM picks sources, route, and analysis"]
+    Q[Question and recent history] --> IR["interpret_request<br/>LLM picks 1-2 sources, the evidence type, and any analysis"]
     IR --> RS{route_sources}
     RS -->|no lookup| WA
-    RS -->|BPS publications| RR[run_retrieval: SP2020 passages]
-    RS -->|BPS tables| SQ[run_sql: BPS tables]
-    RS -->|BPS tables and publications| RB[run_both: both in parallel]
-    RS -->|BNPB, BMKG, Bapanas, or SiPongi| RE["run_external<br/>LLM plans source tool calls, plus BPS if selected"]
-    RR --> RA{analysis requested?}
-    SQ --> RA
-    RB --> RA
-    RE --> RA
-    RA -->|yes| AD[analyze_data: statistics]
+    RS -->|lookup| FS["Fetch evidence from the selected sources<br/>BPS · BNPB · BMKG · Bapanas · SiPongi"]
+    FS --> RA{analysis requested?}
+    RA -->|yes| AD[analyze_data: trend or correlation]
     RA -->|no| WA
     AD --> WA
     subgraph WA[write_answer]
@@ -91,6 +86,10 @@ flowchart TD
     CH -->|no| U[Answer, sources, and optional chart]
     BC --> U
 ```
+
+Sources differ only by what they publish. BPS has two kinds of evidence, statistical tables and SP2020
+publication text, so a BPS lookup can read tables, passages, or both. BNPB, BMKG, Bapanas, and SiPongi publish
+tables or live feeds only.
 
 The source servers and their data feeds:
 
