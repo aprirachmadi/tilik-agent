@@ -126,11 +126,11 @@ and needs no import. The
 [implementation plan](CONNECTOR_MIGRATION_PLAN.md) records the file map and
 source limitations.
 
-### Local Ollama generation smoke test
+### Local generation smoke test
 
-`.env.local` selects the local `gemma4:12b` Ollama model, its OpenAI-compatible
-endpoint, and an isolated Postgres port. It is ignored by Git. Start Ollama and
-load this file into the shell before running Tilik locally:
+`.env.local` holds the local secrets and the isolated Postgres port. It is
+ignored by Git. The model comes from the `llm` block in `configs/default.yaml`.
+Load this file into the shell before running Tilik locally:
 
 ```bash
 set -a
