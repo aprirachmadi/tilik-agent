@@ -50,3 +50,8 @@ data/
 docs/
 .DS_Store
 Thumbs.db
+
+# Local tooling output and stray files
+.playwright-mcp/
+Screenshot *.png
+frontend/nul
