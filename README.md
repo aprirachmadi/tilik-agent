@@ -63,37 +63,6 @@ Open [http://localhost:5173](http://localhost:5173). The dev server proxies `/ap
 
 ## Pipeline
 
-Each question runs through this LangGraph graph (`src/tilik_agent/agent/graph.py`):
-
-```mermaid
-flowchart TD
-    Q[Question and recent history] --> IR["interpret_request<br/>LLM picks sources, route, and analysis"]
-    IR --> RS{route_sources}
-    RS -->|no lookup| WA
-    RS -->|BPS publications| RR[run_retrieval: SP2020 passages]
-    RS -->|BPS tables| SQ[run_sql: BPS tables]
-    RS -->|BPS tables and publications| RB[run_both: both in parallel]
-    RS -->|BNPB, BMKG, Bapanas, or SiPongi| RE["run_external<br/>LLM plans source tool calls, plus BPS if selected"]
-    RR --> RA{analysis requested?}
-    SQ --> RA
-    RB --> RA
-    RE --> RA
-    RA -->|yes| AD[analyze_data: statistics]
-    RA -->|no| WA
-    AD --> WA
-    subgraph WA[write_answer]
-        D[LLM drafts the text and cites evidence IDs] --> CI[Check cited evidence IDs]
-        CI --> CN[Check every number against the sources]
-    end
-    CN -->|a check fails| X[Could not produce a verified answer]
-    CN --> CH{chart needed?}
-    CH -->|yes| BC[build_chart]
-    CH -->|no| U[Answer, sources, and optional chart]
-    BC --> U
-```
-
-The source servers and their data feeds:
-
 ```mermaid
 flowchart TD
     Q[Question] --> I[Interpret place, time, and source]
