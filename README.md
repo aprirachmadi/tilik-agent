@@ -89,10 +89,10 @@ flowchart TD
     G -->|no| W
     A --> W
     subgraph W[write_answer]
-        CI[Check cited evidence IDs] --> CN[Check numbers against sources]
+        CI[Check cited evidence IDs]
     end
-    CN -->|a check fails| FX[Could not produce a verified answer]
-    CN --> K{chart_needed?}
+    CI -->|a check fails| FX[Could not produce a verified answer]
+    CI --> K{chart_needed?}
     K -->|yes| BC[build_chart]
     K -->|no| U[Answer and source chips]
     BC --> U

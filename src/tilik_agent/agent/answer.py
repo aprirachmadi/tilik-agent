@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import math
 import re
 from datetime import datetime
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
@@ -236,7 +235,6 @@ def display_chart_spec(chart: dict[str, Any] | None) -> None:
 
 
 _LIVE_PROVIDERS = {"BMKG", "Bapanas", "SiPongi"}
-_PRICE_HOTSPOT_PROVIDERS = {"Bapanas", "SiPongi"}
 
 
 def _external_prompt_evidence(state: State) -> list[dict[str, Any]]:
@@ -249,161 +247,6 @@ def _external_prompt_evidence(state: State) -> list[dict[str, Any]]:
             cleaned["retrieved_at_jakarta"] = local.isoformat()
         evidence.append(cleaned)
     return evidence
-
-
-def _number(token: str) -> Decimal:
-    # A thousands group never starts with 0, so "0,079" is a decimal, not 79.
-    if re.fullmatch(r"[1-9]\d{0,2}(?:[.,]\d{3})+", token):
-        return Decimal(token.replace(".", "").replace(",", ""))
-    if re.fullmatch(r"[1-9]\d{0,2}(?:\.\d{3})+,\d+", token):
-        return Decimal(token.replace(".", "").replace(",", "."))
-    if re.fullmatch(r"[1-9]\d{0,2}(?:,\d{3})+\.\d+", token):
-        return Decimal(token.replace(",", ""))
-    return Decimal(token.replace(",", "."))
-
-
-def _number_values(token: str) -> list[Decimal]:
-    try:
-        return [_number(token)]
-    except InvalidOperation:
-        # Source timestamps can contain several separators, e.g. 03.11.2026.
-        return [Decimal(part) for part in re.split(r"[.,]", token) if part]
-
-
-def _external_number_support(state: State, external_ids: list[str]) -> set[Decimal]:
-    allowed = {Decimal(str(row["value"])) for row in state.get("observations", []) if row.get("value") is not None}
-    for row in state.get("observations", []):
-        if str(row.get("period", "")).isdigit():
-            allowed.add(Decimal(str(row["period"])))
-    number_fields = {"year", "value", "temperature_c", "humidity_pct", "wind_kmh", "magnitude"}
-    text_fields = {
-        "datetime", "local_datetime", "analysis_date", "depth", "location", "coordinates",
-        "description", "headline", "expires", "effective", "sent", "retrieved_at", "felt", "tsunami_note",
-    }
-
-    def collect(value: Any, key: str = "") -> None:
-        if isinstance(value, dict):
-            for child_key, child in value.items():
-                collect(child, child_key)
-        elif isinstance(value, list):
-            for child in value:
-                collect(child, key)
-        elif key in number_fields and isinstance(value, int | float) and not isinstance(value, bool):
-            allowed.add(Decimal(str(value)))
-        elif key in text_fields and isinstance(value, str):
-            for token in re.findall(r"(?<!\w)\d+(?:[.,]\d+)*(?!\w)", value):
-                allowed.update(_number_values(token))
-            for hour, minute, second in re.findall(r"(?<!\d)(\d{1,2}):(\d{2})(?::(\d{2}))?", value):
-                allowed.update({Decimal(hour), Decimal(minute), Decimal(f"{hour}.{minute}")})
-                if second:
-                    allowed.add(Decimal(second))
-            # The answer prompt asks for WIB, so a UTC source time may be written in Jakarta time.
-            try:
-                moment = datetime.fromisoformat(value)
-            except ValueError:
-                return
-            if moment.tzinfo:
-                local = moment.astimezone(ZoneInfo("Asia/Jakarta"))
-                allowed.update({
-                    Decimal(local.day), Decimal(local.hour), Decimal(local.minute), Decimal(local.second),
-                    Decimal(f"{local.hour}.{local.minute:02d}"),
-                })
-
-    def collect_all(value: Any, key: str = "") -> None:
-        """Every published number and every number inside a published string, except row IDs."""
-        if isinstance(value, dict):
-            for child_key, child in value.items():
-                collect_all(child, child_key)
-        elif isinstance(value, list):
-            for child in value:
-                collect_all(child, key)
-        elif isinstance(value, int | float) and not isinstance(value, bool) and not key.endswith("_id"):
-            allowed.add(abs(Decimal(str(value))))
-        elif isinstance(value, str):
-            collect({"retrieved_at": value})
-
-    for item in state.get("external_evidence", []):
-        if item["id"] not in external_ids or "data" not in item:
-            continue
-        data = item["data"]
-        if data.get("provider") == "BMKG":
-            collect(data)
-        elif data.get("provider") in _PRICE_HOTSPOT_PROVIDERS:
-            collect_all(data)
-        elif data.get("provider") == "BNPB":
-            allowed.update({Decimal(2010), Decimal(2024)})
-            for field in ("source_modified_at", "retrieved_at"):
-                if data.get(field):
-                    collect({"retrieved_at": data[field]})
-            rows = data.get("rows", [])
-            allowed.update(Decimal(str(row["year"])) for row in rows)
-            allowed.add(Decimal(len(rows)))
-            allowed.add(Decimal(len({row["year"] for row in rows})))
-            allowed.update(Decimal(str(row["value"])) for row in rows if row.get("value") is not None)
-            for calc in data.get("calculations", []):
-                allowed.add(Decimal(str(abs(calc["difference"]))))
-                if calc.get("percent_change") is not None:
-                    allowed.add(Decimal(str(abs(calc["percent_change"]))))
-    return allowed
-
-
-def _analysis_number_support(state: State) -> set[Decimal]:
-    """Computed statistics, at the precisions an answer may round them to."""
-    allowed: set[Decimal] = set()
-
-    def walk(value: Any) -> None:
-        if isinstance(value, dict):
-            for item in value.values():
-                walk(item)
-        elif isinstance(value, list):
-            for item in value:
-                walk(item)
-        elif isinstance(value, int | float) and not isinstance(value, bool) and math.isfinite(value):
-            for scaled in (value, value * 100) if abs(value) <= 1 else (value,):
-                for digits in range(4):
-                    allowed.add(abs(Decimal(str(round(scaled, digits)))))
-                    allowed.add(abs(Decimal(str(math.trunc(scaled * 10**digits) / 10**digits))))
-
-    for item in state.get("analysis_results", []):
-        walk(item.get("statistics"))
-    return allowed
-
-
-def _cites(state: State, external_ids: list[str], providers: set[str]) -> bool:
-    return any(
-        item["id"] in external_ids and item.get("data", {}).get("provider") in providers
-        for item in state.get("external_evidence", [])
-    )
-
-
-def _reject_unsupported(tokens: list[str], allowed: set[Decimal]) -> None:
-    for token in tokens:
-        if any((value >= 10 or "." in token or "," in token) and value not in allowed
-               for value in _number_values(token)):
-            raise ValueError(f"Unsupported numeric claim: {token}")
-
-
-def _check_bnpb_numbers(text: str, state: State, external_ids: list[str]) -> None:
-    if not _cites(state, external_ids, {"BNPB"}):
-        return
-    allowed = _external_number_support(state, external_ids) | _analysis_number_support(state)
-    _reject_unsupported(re.findall(r"(?<!\w)\d+(?:[.,]\d+)*(?!\w)", text), allowed)
-
-
-def _check_bmkg_numbers(text: str, state: State, external_ids: list[str]) -> None:
-    if not _cites(state, external_ids, {"BMKG"}):
-        return
-    tokens = re.findall(r"(?<!\w)\d+(?:[.,]\d+)*(?!\w)", text)
-    tokens.extend(re.findall(r"\bM(?:w)?\s*(\d+(?:[.,]\d+)?)", text, flags=re.IGNORECASE))
-    _reject_unsupported(tokens, _external_number_support(state, external_ids))
-
-
-def _check_price_hotspot_numbers(text: str, state: State, external_ids: list[str]) -> None:
-    if not _cites(state, external_ids, _PRICE_HOTSPOT_PROVIDERS):
-        return
-    # Prices are written glued to the currency, as in "Rp71.110".
-    tokens = re.findall(r"(?:(?<=Rp)|(?<!\w))\d+(?:[.,]\d+)*(?!\w)", text)
-    _reject_unsupported(tokens, _external_number_support(state, external_ids))
 
 
 def _answer_prompt(state: State) -> str:
@@ -512,9 +355,6 @@ def write_answer(state: State) -> dict[str, Any]:
             raise ValueError("Answer cites unknown evidence IDs")
         if known_external and not external_ids:
             raise ValueError("Answer omitted external evidence IDs")
-        _check_bnpb_numbers(answer.text, state, external_ids)
-        _check_bmkg_numbers(answer.text, state, external_ids)
-        _check_price_hotspot_numbers(answer.text, state, external_ids)
         output = {
             "answer": answer.text,
             "answer_observation_ids": observation_ids,

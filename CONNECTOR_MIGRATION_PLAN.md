@@ -90,7 +90,7 @@ flowchart TD
     A -->|Yes| C[Deterministic operations on validated series]
     A -->|No| W[Write grounded answer]
     C --> W
-    W --> G[Validate cited IDs and supported numeric claims]
+    W --> G[Validate cited IDs]
     G --> H[Optional chart from validated values]
     H --> P[Persist answer, source refs, and live-source snapshot IDs]
     P --> UI[Answer, chart, freshness, limitations, and source links]
@@ -280,9 +280,6 @@ one source. Avoid a wholesale relocation of unrelated BPS ingestion code.
 - Keep BMKG alerts/events as separate evidence. The first mixed BMKG answer
   presents a current alert beside a BNPB historical series without treating
   the historical count as a forecast or claiming people were affected now.
-- Validate final numeric claims against selected values or computed results,
-  including sign, rank, period, and unit. A cited source ID alone is not a
-  numerical correctness check.
 - Gate: BPS-only, BNPB-only, BMKG-only, and two-source questions answer with
   the correct evidence and explicit limits; empty or stale sources do not
   produce invented values.

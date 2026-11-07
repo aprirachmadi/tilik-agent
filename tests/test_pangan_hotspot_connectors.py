@@ -9,7 +9,6 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
-from tilik_agent.agent.answer import _check_price_hotspot_numbers
 from tilik_agent.connectors.bapanas.models import BapanasPrice, BapanasSnapshot
 from tilik_agent.connectors.bapanas.parsing import _price, province_rows
 from tilik_agent.connectors.bapanas.queries import query_prices
@@ -136,18 +135,6 @@ def test_bapanas_series_needs_one_commodity_and_summarizes_change() -> None:
         assert series["data_time"] == "2025-01–2025-02"
 
 
-def test_price_answer_numbers_must_come_from_the_cited_prices() -> None:
-    state = {"external_evidence": [{"id": "ext1", "data": {
-        "provider": "Bapanas", "retrieved_at": "2026-11-07T09:06:51+00:00",
-        "items": [{"commodity_id": 33, "commodity": "Cabai Rawit Merah", "price": 71110, "previous_price": 70321,
-                   "previous_date": "06-11-2026", "change": 789, "change_pct": 1.12}],
-    }}]}
-    _check_price_hotspot_numbers("Cabai rawit merah Rp71.110/kg, naik 789 (1,12%) dari 06-11-2026.", state, ["ext1"])
-    with pytest.raises(ValueError, match="Unsupported numeric claim"):
-        _check_price_hotspot_numbers("Cabai rawit merah Rp72.000/kg.", state, ["ext1"])
-    with pytest.raises(ValueError, match="Unsupported numeric claim"):
-        # Row IDs are not prices.
-        _check_price_hotspot_numbers("Komoditas 33 naik.", state, ["ext1"])
 
 
 

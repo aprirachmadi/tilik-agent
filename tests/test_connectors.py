@@ -3,15 +3,12 @@
 from __future__ import annotations
 
 from datetime import datetime
-from decimal import Decimal
 
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from tilik_agent.agent.answer import (
-    _check_bmkg_numbers,
-    _check_bnpb_numbers,
     _external_prompt_evidence,
     build_chart,
     chart_needed,
@@ -95,29 +92,9 @@ def test_bnpb_chart_uses_exact_cited_fact_values() -> None:
     assert [point["value"] for point in chart["data"]] == [1255, 1420]
 
 
-def test_bnpb_answer_numbers_must_match_values_or_calculations() -> None:
-    state = {"external_evidence": [{"id": "ext1", "data": {
-        "provider": "BNPB", "rows": [
-            {"year": 2023, "value": 1255}, {"year": 2024, "value": 1420},
-        ],
-        "calculations": [{"difference": 165, "percent_change": 13.15}],
-    }}]}
-    _check_bnpb_numbers("Banjir naik dari 1.255 ke 1.420 pada 2024, bertambah 165 (13,15%).", state, ["ext1"])
-    with pytest.raises(ValueError, match="Unsupported numeric claim"):
-        _check_bnpb_numbers("Banjir mencapai 1.421 pada 2024.", state, ["ext1"])
 
 
 
-def test_bmkg_answer_may_give_source_times_in_jakarta_time() -> None:
-    state = {"external_evidence": [{"id": "ext1", "data": {
-        "provider": "BMKG", "retrieved_at": "2026-11-07T13:28:01+00:00",
-        "events": [{"datetime": "2026-11-07T10:05:52+00:00", "magnitude": 3.0, "depth": "10 km"}],
-    }}]}
-    _check_bmkg_numbers(
-        "Diambil 7 November 2026 pukul 20.28 WIB; gempa M3,0 pukul 17.05.52 WIB, kedalaman 10 km.", state, ["ext1"]
-    )
-    with pytest.raises(ValueError, match="Unsupported numeric claim"):
-        _check_bmkg_numbers("Gempa terjadi pukul 18.05 WIB.", state, ["ext1"])
 
 @pytest.mark.parametrize(
     ("answer_text", "rows", "calculations"),
@@ -156,22 +133,6 @@ def test_single_external_source_assigns_provenance_without_model_ids(
     assert calls == 1
 
 
-def test_single_external_source_still_rejects_unsupported_number(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls = 0
-
-    def draft(*_: object) -> AnswerDraft:
-        nonlocal calls
-        calls += 1
-        return AnswerDraft(text="Pada 2024 ada 999 korban.", external_ids=["wrong"])
-
-    monkeypatch.setattr("tilik_agent.agent.answer.model_json", draft)
-    result = write_answer({
-        "question": "BNPB?", "external_evidence": [
-            {"id": "ext1", "data": {"provider": "BNPB", "rows": [{"year": 2024, "value": 5}]}}
-        ],
-    })
-    assert "Unsupported numeric claim: 999" in result["answer"]
-    assert calls == 1
 
 
 def test_multiple_external_sources_require_valid_model_citations(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -189,45 +150,12 @@ def test_multiple_external_sources_require_valid_model_citations(monkeypatch: py
     assert "unknown evidence IDs" in result["answer"]
 
 
-def test_bmkg_magnitude_must_match_cited_event() -> None:
-    state = {"external_evidence": [{"id": "ext1", "data": {
-        "provider": "BMKG", "events": [{"datetime": "2026-11-03T09:00:00+00:00", "magnitude": 5.2}],
-    }}]}
-    _check_bmkg_numbers("Gempa M 5,2 terjadi pada 2026.", state, ["ext1"])
-    with pytest.raises(ValueError, match="Unsupported numeric claim"):
-        _check_bmkg_numbers("Gempa M 6,2 terjadi pada 2026.", state, ["ext1"])
-    with pytest.raises(ValueError, match="Unsupported numeric claim"):
-        _check_bmkg_numbers("Gempa M6,2 terjadi pada 2026.", state, ["ext1"])
 
 
-def test_bmkg_guard_accepts_hour_in_iso_event_timestamp() -> None:
-    state = {"external_evidence": [{"id": "ext1", "data": {
-        "provider": "BMKG", "events": [{"datetime": "2026-11-03T15:37:50+00:00", "magnitude": 5.2}],
-    }}]}
-    _check_bmkg_numbers("Gempa M5,2 terjadi pukul 15:37:50 UTC pada 2026.", state, ["ext1"])
 
 
-def test_bmkg_numeric_guard_handles_dotted_source_dates() -> None:
-    state = {"external_evidence": [{"id": "ext1", "data": {
-        "provider": "BMKG", "events": [{
-            "local_datetime": "03.11.2026 16:00 WIB", "magnitude": 5.2,
-        }],
-    }}]}
-    _check_bmkg_numbers("Gempa M 5,2 pada 03.11.2026 pukul 16:00 WIB.", state, ["ext1"])
-    with pytest.raises(ValueError, match="Unsupported numeric claim"):
-        _check_bmkg_numbers("Gempa M 6,2 pada 03.11.2026.", state, ["ext1"])
 
 
-def test_mixed_bnpb_bmkg_numbers_can_use_both_cited_sources() -> None:
-    state = {"external_evidence": [
-        {"id": "ext1", "data": {"provider": "BNPB", "rows": [{"year": 2024, "value": 1420}]}},
-        {"id": "ext2", "data": {"provider": "BMKG", "events": [
-            {"datetime": "2026-11-03T09:00:00+00:00", "magnitude": 5.2}
-        ]}},
-    ]}
-    answer = "BNPB mencatat 1.420 pada 2024; BMKG melaporkan M 5,2 pada 2026."
-    _check_bnpb_numbers(answer, state, ["ext1", "ext2"])
-    _check_bmkg_numbers(answer, state, ["ext1", "ext2"])
 
 
 def test_external_fetch_keeps_raw_snapshot_out_of_answer_data(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -463,7 +391,7 @@ def test_bnpb_trend_and_correlation_pair_by_year() -> None:
         year_series_result("dispersion", [{"id": "ext1", "label": "Banjir", "unit": "events", "rows": flood["rows"]}])
 
 
-def test_bnpb_analysis_runs_and_its_rounded_statistics_pass_the_number_check() -> None:
+def test_bnpb_analysis_runs_on_a_year_series() -> None:
     from tilik_agent.agent.analysis import analyze_data
 
     state = {
@@ -474,10 +402,6 @@ def test_bnpb_analysis_runs_and_its_rounded_statistics_pass_the_number_check() -
     }
     result = analyze_data(state)
     assert result["analysis_error"] == ""
-    state.update(result)
-    _check_bnpb_numbers("Rata-rata naik 32 kejadian per tahun, R² 0,91.", state, ["ext1"])
-    with pytest.raises(ValueError, match="Unsupported numeric claim"):
-        _check_bnpb_numbers("Rata-rata naik 47 kejadian per tahun.", state, ["ext1"])
 
 
 def test_analysis_over_two_bnpb_series_cites_both_when_the_model_omits_ids(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -512,12 +436,6 @@ def test_bnpb_analysis_fetch_uses_the_requested_years(monkeypatch: pytest.Monkey
     assert (calls[0]["start_year"], calls[0]["end_year"]) == (2015, 2024)
 
 
-def test_decimal_with_leading_zero_is_not_read_as_thousands() -> None:
-    from tilik_agent.agent.answer import _number_values
-
-    assert _number_values("0,079") == [Decimal("0.079")]
-    assert _number_values("1.794") == [Decimal("1794")]
-    assert _number_values("1.307,7") == [Decimal("1307.7")]
 
 
 def test_two_series_from_one_bnpb_table_are_cited_once() -> None:

@@ -23,7 +23,6 @@ The frontend's `answerWithoutDuplicateChart()` hides an ASCII chart that matches
 1. **Placeholder**:
    - In `_answer_prompt()`, tell the writer to put `[[chart]]` on its own line where a chart would help the explanation, for example after a one-sentence intro.
    - The writer cannot know whether `chart_needed()` will build a chart, so the marker is a request, not a guarantee.
-   - The number check from 01 must ignore the marker.
 2. **Blocks** (`answer_blocks(text, chart) -> tuple[str, list[dict] | None]` in `answer.py`, called from `question_result()`):
    - Block types: `{"type": "text", "text": ...}` and `{"type": "chart"}`.
    - When there is a chart:
