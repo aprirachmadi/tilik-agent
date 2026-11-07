@@ -66,7 +66,7 @@ Open [http://localhost:5173](http://localhost:5173). The dev server proxies `/ap
 ```mermaid
 flowchart TD
     Q[Question] --> I[interpret_request]
-    I -->|plan failed or direct| W[write_answer]
+    I -->|plan failed or direct| W
     I -->|BPS only: context| R[run_retrieval: documents]
     I -->|BPS only: data| S[run_sql: SQL agent and tools loop]
     I -->|BPS only: both| RB[run_both: SQL and retrieval in parallel]
@@ -88,7 +88,11 @@ flowchart TD
     G -->|yes| A[analyze_data: supported comparisons]
     G -->|no| W
     A --> W
-    W --> K{chart_needed?}
+    subgraph W[write_answer]
+        CI[Check cited evidence IDs] --> CN[Check numbers against sources]
+    end
+    CN -->|a check fails| FX[Could not produce a verified answer]
+    CN --> K{chart_needed?}
     K -->|yes| BC[build_chart]
     K -->|no| U[Answer and source chips]
     BC --> U
