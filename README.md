@@ -138,8 +138,8 @@ set -a
 set +a
 ```
 
-The smoke script runs one real `run_question` generation through each of the
-BPS, BNPB, BMKG, Bapanas, and SiPongi MCP connectors. It does not call benchmark judges. It
+`tests/e2e/test_pipeline_live.py` runs one real `run_question` generation through each of the
+BPS, BNPB, BMKG, Bapanas, and SiPongi MCP connectors, and one two-turn chat. It does not call benchmark judges. It
 expects a migrated Postgres with BNPB facts and the BPS province density table.
 For a fresh database using the settings in `.env.local` (Postgres on `127.0.0.1:5431`):
 
@@ -151,7 +151,7 @@ poetry run tilik ingest bapanas
 poetry run tilik ingest sipongi
 poetry run tilik ingest catalog
 poetry run tilik ingest table --id 'MTQxIzI='
-poetry run python examples/connector_e2e.py
+.venv/bin/python -m pytest tests/e2e/test_pipeline_live.py
 ```
 
 The BPS table import needs `BPS_API_KEY` in `.env`. The BPS smoke question uses

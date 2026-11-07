@@ -42,7 +42,8 @@ set -a; . ./.env.local; set +a
 | Web (port 5173) | `npm --prefix frontend run dev -- --port 5173 --strictPort` (preview launch config `web`) |
 | Unit tests | `.venv/bin/python -m pytest -q --ignore=tests/e2e` |
 | Lint | `.venv/bin/ruff check src tests` |
-| Live-site e2e | `.venv/bin/python -m pytest tests/e2e -k <case>` (needs the API and web servers running) |
+| Pipeline e2e | `.venv/bin/python -m pytest tests/e2e/test_pipeline_live.py -k <case>` (in-process, needs Postgres) |
+| Live-site e2e | `.venv/bin/python -m pytest tests/e2e/test_live_site.py -k <case>` (needs the API and web servers running) |
 | Generation benchmark | `poetry run tilik benchmark` (`src/tilik_agent/evals/datasets/generation_benchmark.json`) |
 | Conversation benchmark | `poetry run tilik benchmark --conversations` |
 | Judge benchmark | `poetry run tilik benchmark --judges` |
@@ -52,5 +53,7 @@ Benchmarks and e2e tests make real model calls and cost time and credits. Run th
 
 ## Where tests go
 
-- Unit tests go in `tests/`. Integration and end-to-end tests go in `tests/e2e/` as pytest tests.
-- `examples/` is only for short usage examples. Never put e2e, integration, or smoke tests there.
+- Unit tests go in `tests/`. Integration tests, meaning anything that asserts and fails, including live e2e checks,
+  go in `tests/e2e/` as pytest tests.
+- `examples/` may hold runnable e2e runs of the pipeline or evals that print results for a person to read. If the
+  script checks results and fails on a wrong one, it is an integration test and belongs in `tests/e2e/`.
