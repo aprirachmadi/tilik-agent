@@ -24,6 +24,6 @@ export const sourceCatalog: SourceInfo[] = [
     id: "bmkg",
     name: "Badan Meteorologi, Klimatologi, dan Geofisika",
     coverage: "Gempa terbaru, prakiraan cuaca tiga hari, dan peringatan dini aktif.",
-    questions: ["Apa gempa terbaru menurut BMKG?", "Apakah ada peringatan dini cuaca aktif untuk Jakarta menurut BMKG?"],
+    questions: ["Gempa terbaru yang tercatat BMKG di Indonesia", "Apakah ada peringatan dini cuaca aktif untuk Jakarta menurut BMKG?"],
   },
 ];
