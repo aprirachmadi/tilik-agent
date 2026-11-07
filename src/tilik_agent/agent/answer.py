@@ -297,6 +297,17 @@ def _external_number_support(state: State, external_ids: list[str]) -> set[Decim
                 allowed.update({Decimal(hour), Decimal(minute), Decimal(f"{hour}.{minute}")})
                 if second:
                     allowed.add(Decimal(second))
+            # The answer prompt asks for WIB, so a UTC source time may be written in Jakarta time.
+            try:
+                moment = datetime.fromisoformat(value)
+            except ValueError:
+                return
+            if moment.tzinfo:
+                local = moment.astimezone(ZoneInfo("Asia/Jakarta"))
+                allowed.update({
+                    Decimal(local.day), Decimal(local.hour), Decimal(local.minute), Decimal(local.second),
+                    Decimal(f"{local.hour}.{local.minute:02d}"),
+                })
 
     def collect_all(value: Any, key: str = "") -> None:
         """Every published number and every number inside a published string, except row IDs."""

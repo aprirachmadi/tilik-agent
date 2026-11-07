@@ -107,6 +107,18 @@ def test_bnpb_answer_numbers_must_match_values_or_calculations() -> None:
         _check_bnpb_numbers("Banjir mencapai 1.421 pada 2024.", state, ["ext1"])
 
 
+
+def test_bmkg_answer_may_give_source_times_in_jakarta_time() -> None:
+    state = {"external_evidence": [{"id": "ext1", "data": {
+        "provider": "BMKG", "retrieved_at": "2026-11-07T13:28:01+00:00",
+        "events": [{"datetime": "2026-11-07T10:05:52+00:00", "magnitude": 3.0, "depth": "10 km"}],
+    }}]}
+    _check_bmkg_numbers(
+        "Diambil 7 November 2026 pukul 20.28 WIB; gempa M3,0 pukul 17.05.52 WIB, kedalaman 10 km.", state, ["ext1"]
+    )
+    with pytest.raises(ValueError, match="Unsupported numeric claim"):
+        _check_bmkg_numbers("Gempa terjadi pukul 18.05 WIB.", state, ["ext1"])
+
 @pytest.mark.parametrize(
     ("answer_text", "rows", "calculations"),
     [
