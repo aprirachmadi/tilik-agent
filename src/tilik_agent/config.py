@@ -222,23 +222,15 @@ def _yaml_agent_config() -> AgentConfig:
 
 
 def get_agent_config() -> AgentConfig:
-    """Return agent settings from ``configs/default.yaml``, with env overrides applied."""
+    """Return agent settings from ``configs/default.yaml``, with the retrieval collection override applied."""
     load_project_env()
     config = _yaml_agent_config()
-    llm_updates: dict[str, str] = {}
-    model = os.getenv("TILIK_MODEL")
-    base_url = os.getenv("TILIK_LLM_BASE_URL")
-    if model:
-        llm_updates["model"] = model
-    if base_url:
-        llm_updates["base_url"] = base_url
     retrieval_updates: dict[str, str] = {}
     collection = os.getenv("RETRIEVAL_COLLECTION") or os.getenv("SP2020_COLLECTION")
     if collection:
         retrieval_updates["collection"] = collection
     return config.model_copy(
         update={
-            "llm": config.llm.model_copy(update=llm_updates),
             "retrieval": config.retrieval.model_copy(update=retrieval_updates),
         }
     )

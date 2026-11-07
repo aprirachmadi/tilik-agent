@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
-from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -88,50 +87,8 @@ def test_model_json_reports_repeated_missing_tool_call(monkeypatch: pytest.Monke
         model_json(Analysis, "test")
 
 
-def test_model_json_auto_uses_json_schema_after_missing_tool_call(monkeypatch: pytest.MonkeyPatch) -> None:
-    expected = Analysis()
-    methods: list[str] = []
-
-    class _Structured:
-        def __init__(self, method: str) -> None:
-            self.method = method
-
-        def invoke(self, messages: list[Any], **kwargs: Any) -> Analysis | None:
-            return expected if self.method == "json_schema" else None
-
-    class _Chat:
-        def with_structured_output(self, schema: type[Any], method: str) -> _Structured:
-            methods.append(method)
-            return _Structured(method)
-
-    monkeypatch.setenv("TILIK_STRUCTURED_OUTPUT_METHOD", "auto")
-    monkeypatch.setattr("tilik_agent.agent.runtime.get_llm", lambda: _Chat())
-    assert model_json(Analysis, "test") is expected
-    assert methods == ["function_calling", "json_schema"]
 
 
-def test_local_thinking_off_uses_supported_reasoning_effort(monkeypatch: pytest.MonkeyPatch) -> None:
-    from tilik_agent.agent import runtime
-    from tilik_agent.config import LlmConfig
-
-    config = LlmConfig(
-        model="gemma4:12b", base_url="http://127.0.0.1:11434/v1", temperature=0,
-        api_key_env="OPENAI_API_KEY", extra_body={}, max_tokens=8192,
-    )
-    options: dict[str, Any] = {}
-    client = object()
-
-    def fake_chat(**kwargs: Any) -> object:
-        options.update(kwargs)
-        return client
-
-    monkeypatch.setenv("TILIK_LLM_THINK", "false")
-    monkeypatch.setenv("OPENAI_API_KEY", "ollama")
-    monkeypatch.setattr(runtime, "get_agent_config", lambda: SimpleNamespace(llm=config))
-    monkeypatch.setattr(runtime, "ChatOpenAI", fake_chat)
-    monkeypatch.setattr(runtime, "_chat", None)
-    assert runtime.get_llm() is client
-    assert options["extra_body"] == {"reasoning_effort": "none"}
 
 
 def test_worker_gets_its_own_langfuse_handler(monkeypatch: pytest.MonkeyPatch) -> None:

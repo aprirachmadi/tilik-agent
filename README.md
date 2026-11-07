@@ -220,8 +220,6 @@ These variables override the file when they are set:
 
 | Variable | Overrides |
 | --- | --- |
-| `TILIK_MODEL` | `llm.model` |
-| `TILIK_LLM_BASE_URL` | `llm.base_url` |
 | `RETRIEVAL_COLLECTION` | `retrieval.collection`. `SP2020_COLLECTION` remains accepted for existing environments. |
 | `PGVECTOR_CONNECTION` | Optional pgvector URL. When unset, the app uses the same URL as the observation database. |
 | `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` | Observation database used by SQL lookup. The password is required in `.env`. |
