@@ -65,22 +65,33 @@ Open [http://localhost:5173](http://localhost:5173). The dev server proxies `/ap
 
 ```mermaid
 flowchart TD
-    Q[Question] --> I[Interpret place, time, and source]
-    I --> C[Tilik MCP client]
+    Q[Question] --> I[interpret_request]
+    I -->|plan failed or direct| W[write_answer]
+    I -->|BPS only: context| R[run_retrieval: documents]
+    I -->|BPS only: data| S[run_sql: SQL agent and tools loop]
+    I -->|BPS only: both| RB[run_both: SQL and retrieval in parallel]
+    I -->|any non-BPS source| X[run_external: BPS plus selected sources]
+    X --> C[Tilik MCP client]
     C --> B[BPS MCP: observations and SP2020]
     C --> N[BNPB MCP: synchronized aggregates]
     C --> M[BMKG MCP: live official feeds]
     C --> F[Bapanas MCP: live and monthly food prices]
     C --> H[SiPongi MCP: live and monthly hotspots]
-    B --> V[Validate evidence and provenance]
-    N --> V
-    M --> V
-    F --> V
-    H --> V
-    V --> A[Calculate supported comparisons]
-    A --> W[Write grounded answer]
-    W --> P[Save citations and live evidence snapshots]
-    P --> U[Answer, source chips, and optional chart]
+    S --> B
+    R --> D[Documents]
+    RB --> B
+    RB --> D
+    R --> G{Statistical operation requested?}
+    S --> G
+    RB --> G
+    X --> G
+    G -->|yes| A[analyze_data: supported comparisons]
+    G -->|no| W
+    A --> W
+    W --> K{chart_needed?}
+    K -->|yes| BC[build_chart]
+    K -->|no| U[Answer and source chips]
+    BC --> U
     CKAN[BNPB CKAN DataStore] --> SYNC[Daily idempotent sync]
     SYNC --> N
     LIVE[BMKG official JSON and CAP] --> M
