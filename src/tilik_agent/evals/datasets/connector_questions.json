@@ -45,6 +45,26 @@
       "question": "Ada peringatan BMKG sekarang; bagaimana riwayat banjir nasional BNPB pada 2024?",
       "sources": ["bmkg", "bnpb"],
       "expect": "Place current warnings beside history without treating either as a forecast of disaster occurrence."
+    },
+    {
+      "question": "Berapa harga cabai rawit merah hari ini di Jawa Barat menurut Bapanas?",
+      "sources": ["bapanas"],
+      "expect": "Use the live consumer price for Jawa Barat; give the price, the change from the previous date, and the Jakarta retrieval time."
+    },
+    {
+      "question": "Bagaimana harga beras premium nasional per bulan sepanjang 2025 menurut Bapanas?",
+      "sources": ["bapanas"],
+      "expect": "Use synced monthly averages 2025-01 to 2025-12; say they are monthly averages and report the first-to-last change from the summary."
+    },
+    {
+      "question": "Berapa titik panas yang terdeteksi 24 jam terakhir di Indonesia menurut SiPongi?",
+      "sources": ["sipongi"],
+      "expect": "Use the live 24-hour national count; call them hotspots, not fires, and name the satellites and confidence counted."
+    },
+    {
+      "question": "Apakah titik panas di Kalimantan Barat naik dari 2019 sampai 2025?",
+      "sources": ["sipongi"],
+      "expect": "Use the NASA-MODIS monthly series for Kalimantan Barat; do not combine satellites across years."
     }
   ]
 }

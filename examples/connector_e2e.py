@@ -19,6 +19,8 @@ CASES = {
     "bps": "Berapa kepadatan penduduk DKI Jakarta pada 2021 menurut BPS?",
     "bnpb": "Berapa kejadian banjir di Indonesia pada 2024 menurut BNPB?",
     "bmkg": "Gempa terbaru yang tercatat BMKG di Indonesia",
+    "bapanas": "Berapa harga cabai rawit merah hari ini di Jawa Barat menurut Bapanas?",
+    "sipongi": "Berapa titik panas yang terdeteksi 24 jam terakhir di Indonesia menurut SiPongi?",
 }
 
 

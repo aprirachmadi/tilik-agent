@@ -35,6 +35,11 @@ _SERVERS = {
         "tilik_agent.connectors.bmkg.mcp",
         frozenset({"bmkg_forecast", "bmkg_earthquakes", "bmkg_active_warnings"}),
     ),
+    "bapanas": ("tilik_agent.connectors.bapanas.mcp", frozenset({"bapanas_prices_today", "bapanas_price_series"})),
+    "sipongi": (
+        "tilik_agent.connectors.sipongi.mcp",
+        frozenset({"sipongi_recent_hotspots", "sipongi_hotspot_series"}),
+    ),
 }
 
 

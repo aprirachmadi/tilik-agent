@@ -1,4 +1,4 @@
-"""Plan and execute narrow BNPB/BMKG MCP queries."""
+"""Plan and execute narrow BNPB, BMKG, Bapanas, and SiPongi MCP queries."""
 
 from __future__ import annotations
 
@@ -16,8 +16,11 @@ from tilik_agent.connectors.mcp_client import call_connector
 
 
 class ExternalCall(BaseModel):
-    connector: Literal["bnpb", "bmkg"]
-    tool: Literal["bnpb_query_series", "bmkg_forecast", "bmkg_earthquakes", "bmkg_active_warnings"]
+    connector: Literal["bnpb", "bmkg", "bapanas", "sipongi"]
+    tool: Literal[
+        "bnpb_query_series", "bmkg_forecast", "bmkg_earthquakes", "bmkg_active_warnings",
+        "bapanas_prices_today", "bapanas_price_series", "sipongi_recent_hotspots", "sipongi_hotspot_series",
+    ]
     arguments: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -28,7 +31,10 @@ class ExternalPlan(BaseModel):
 _TOOLS = {
     "bnpb": {"bnpb_query_series"},
     "bmkg": {"bmkg_forecast", "bmkg_earthquakes", "bmkg_active_warnings"},
+    "bapanas": {"bapanas_prices_today", "bapanas_price_series"},
+    "sipongi": {"sipongi_recent_hotspots", "sipongi_hotspot_series"},
 }
+_SERIES_TOOLS = {"bnpb_query_series", "bapanas_price_series", "sipongi_hotspot_series"}
 
 
 def _earthquake_feed_for(question: str) -> str | None:
@@ -67,6 +73,21 @@ BMKG tools: bmkg_forecast(place) accepts Kemayoran or a verified adm4 code;
 bmkg_earthquakes(feed=latest|recent|felt); bmkg_active_warnings(area optional).
 Do not invent an adm4 code. If an unsupported location is requested, call
 bmkg_forecast with its name so the connector reports the limitation.
+Bapanas tools (consumer food prices): bapanas_prices_today(commodity optional,
+province optional) for the latest daily price; bapanas_price_series(commodity,
+start_month=YYYY-MM, end_month=YYYY-MM, geography_level=national|province,
+province optional) for monthly average prices from 2021-06, at most 72 months.
+Commodities include Beras Premium, Beras Medium, Cabai Rawit Merah, Cabai Merah
+Keriting, Cabai Merah Besar, Bawang Merah, Bawang Putih Bonggol, Daging Sapi
+Murni, Daging Ayam Ras, Telur Ayam Ras, Gula Konsumsi, Minyakita, Minyak Goreng
+Kemasan, Tepung Terigu Kemasan, Ikan Kembung, Garam Konsumsi.
+SiPongi tools (satellite hotspots, not confirmed fires):
+sipongi_recent_hotspots(hours=12|24|48, province optional);
+sipongi_hotspot_series(start_month=YYYY-MM, end_month=YYYY-MM,
+geography_level=national|province|district, province required for district,
+satellite=NASA-MODIS (default, the only series comparable across years) or all
+(only within one calendar year), confidence=all|high|medium|low), from 2015-01.
+Today in Jakarta is {datetime.now(ZoneInfo("Asia/Jakarta")).date().isoformat()}.
 Question: {state['question']}"""
     try:
         plan = model_json(ExternalPlan, prompt)
@@ -96,7 +117,7 @@ Question: {state['question']}"""
                 data = RESULT_MODELS[call.tool].model_validate(data).model_dump(mode="json")
                 if call.connector == "bmkg" and call.tool == "bmkg_forecast":
                     _select_forecast_day(state["question"], data)
-                if call.connector == "bnpb" and len(data.get("rows", [])) > 150:
+                if call.tool in _SERIES_TOOLS and len(data.get("rows", [])) > 150:
                     item["error"] = "Query returned too many rows for a reliable answer; narrow the place or years"
                 else:
                     item["data"] = data

@@ -101,6 +101,29 @@ def ingest_bnpb() -> None:
         typer.echo(f"{kind}: {count} new facts")
 
 
+@ingest_app.command("bapanas")
+def ingest_bapanas() -> None:
+    """Synchronize monthly province consumer prices from Bapanas Panel Harga Pangan."""
+    from tilik_agent.connectors.bapanas.ingest import sync_bapanas
+
+    with _session() as session:
+        counts = sync_bapanas(session)
+    for commodity, count in counts.items():
+        typer.echo(f"{commodity}: {count} new months")
+
+
+@ingest_app.command("sipongi")
+def ingest_sipongi() -> None:
+    """Synchronize monthly national hotspot counts from SiPongi."""
+    from tilik_agent.connectors.sipongi.ingest import sync_sipongi
+
+    with _session() as session:
+        added = sync_sipongi(session)
+    for month, hotspots in added.items():
+        typer.echo(f"{month}: {hotspots} hotspots")
+    typer.echo(f"{len(added)} new months")
+
+
 def _load(*, table_id: str | None) -> IngestReport:
     _configure_logging()
     settings = get_settings()

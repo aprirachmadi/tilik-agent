@@ -235,12 +235,16 @@ def display_chart_spec(chart: dict[str, Any] | None) -> None:
     figure.show()
 
 
+_LIVE_PROVIDERS = {"BMKG", "Bapanas", "SiPongi"}
+_PRICE_HOTSPOT_PROVIDERS = {"Bapanas", "SiPongi"}
+
+
 def _external_prompt_evidence(state: State) -> list[dict[str, Any]]:
     evidence = []
     for item in state.get("external_evidence", []):
         cleaned = {key: value for key, value in item.items() if key != "snapshot_payload"}
         data = cleaned.get("data")
-        if data and data.get("provider") == "BMKG" and data.get("retrieved_at"):
+        if data and data.get("provider") in _LIVE_PROVIDERS and data.get("retrieved_at"):
             local = datetime.fromisoformat(data["retrieved_at"]).astimezone(ZoneInfo("Asia/Jakarta"))
             cleaned["retrieved_at_jakarta"] = local.isoformat()
         evidence.append(cleaned)
@@ -294,12 +298,27 @@ def _external_number_support(state: State, external_ids: list[str]) -> set[Decim
                 if second:
                     allowed.add(Decimal(second))
 
+    def collect_all(value: Any, key: str = "") -> None:
+        """Every published number and every number inside a published string, except row IDs."""
+        if isinstance(value, dict):
+            for child_key, child in value.items():
+                collect_all(child, child_key)
+        elif isinstance(value, list):
+            for child in value:
+                collect_all(child, key)
+        elif isinstance(value, int | float) and not isinstance(value, bool) and not key.endswith("_id"):
+            allowed.add(abs(Decimal(str(value))))
+        elif isinstance(value, str):
+            collect({"retrieved_at": value})
+
     for item in state.get("external_evidence", []):
         if item["id"] not in external_ids or "data" not in item:
             continue
         data = item["data"]
         if data.get("provider") == "BMKG":
             collect(data)
+        elif data.get("provider") in _PRICE_HOTSPOT_PROVIDERS:
+            collect_all(data)
         elif data.get("provider") == "BNPB":
             allowed.update({Decimal(2010), Decimal(2024)})
             for field in ("source_modified_at", "retrieved_at"):
@@ -339,32 +358,41 @@ def _analysis_number_support(state: State) -> set[Decimal]:
     return allowed
 
 
-def _check_bnpb_numbers(text: str, state: State, external_ids: list[str]) -> None:
-    if not any(
-        item["id"] in external_ids and item.get("data", {}).get("provider") == "BNPB"
+def _cites(state: State, external_ids: list[str], providers: set[str]) -> bool:
+    return any(
+        item["id"] in external_ids and item.get("data", {}).get("provider") in providers
         for item in state.get("external_evidence", [])
-    ):
-        return
-    allowed = _external_number_support(state, external_ids) | _analysis_number_support(state)
-    for token in re.findall(r"(?<!\w)\d+(?:[.,]\d+)*(?!\w)", text):
-        if any((value >= 10 or "." in token or "," in token) and value not in allowed
-               for value in _number_values(token)):
-            raise ValueError(f"Unsupported numeric claim: {token}")
+    )
 
 
-def _check_bmkg_numbers(text: str, state: State, external_ids: list[str]) -> None:
-    if not any(
-        item["id"] in external_ids and item.get("data", {}).get("provider") == "BMKG"
-        for item in state.get("external_evidence", [])
-    ):
-        return
-    allowed = _external_number_support(state, external_ids)
-    tokens = re.findall(r"(?<!\w)\d+(?:[.,]\d+)*(?!\w)", text)
-    tokens.extend(re.findall(r"\bM(?:w)?\s*(\d+(?:[.,]\d+)?)", text, flags=re.IGNORECASE))
+def _reject_unsupported(tokens: list[str], allowed: set[Decimal]) -> None:
     for token in tokens:
         if any((value >= 10 or "." in token or "," in token) and value not in allowed
                for value in _number_values(token)):
             raise ValueError(f"Unsupported numeric claim: {token}")
+
+
+def _check_bnpb_numbers(text: str, state: State, external_ids: list[str]) -> None:
+    if not _cites(state, external_ids, {"BNPB"}):
+        return
+    allowed = _external_number_support(state, external_ids) | _analysis_number_support(state)
+    _reject_unsupported(re.findall(r"(?<!\w)\d+(?:[.,]\d+)*(?!\w)", text), allowed)
+
+
+def _check_bmkg_numbers(text: str, state: State, external_ids: list[str]) -> None:
+    if not _cites(state, external_ids, {"BMKG"}):
+        return
+    tokens = re.findall(r"(?<!\w)\d+(?:[.,]\d+)*(?!\w)", text)
+    tokens.extend(re.findall(r"\bM(?:w)?\s*(\d+(?:[.,]\d+)?)", text, flags=re.IGNORECASE))
+    _reject_unsupported(tokens, _external_number_support(state, external_ids))
+
+
+def _check_price_hotspot_numbers(text: str, state: State, external_ids: list[str]) -> None:
+    if not _cites(state, external_ids, _PRICE_HOTSPOT_PROVIDERS):
+        return
+    # Prices are written glued to the currency, as in "Rp71.110".
+    tokens = re.findall(r"(?:(?<=Rp)|(?<!\w))\d+(?:[.,]\d+)*(?!\w)", text)
+    _reject_unsupported(tokens, _external_number_support(state, external_ids))
 
 
 def _answer_prompt(state: State) -> str:
@@ -428,7 +456,13 @@ do not infer a trend or causal link from them.
 For external claims, cite the provider and relevant date in text, and include
 the supporting ext ID in external_ids. A forecast is not observed weather;
 a warning is active only until its expiry.
-For BMKG retrieval dates, use retrieved_at_jakarta rather than the UTC date.
+For BMKG, Bapanas, and SiPongi retrieval dates, use retrieved_at_jakarta rather
+than the UTC date. A Bapanas monthly value is an average over that month, only
+through period_end when complete_month is false. A SiPongi hotspot is a
+satellite heat detection, not a confirmed fire; name the satellite and
+confidence a count covers. SiPongi rows with period=year are sums of monthly
+counts; a year with complete_year false is partial and not comparable to a
+full year.
 Intermediate calculations: {compact_json(state.get("intermediate_analysis", {}))}
 Verified statistical results: {compact_json(results)}
 Statistical selections: {compact_json(selections)}
@@ -469,6 +503,7 @@ def write_answer(state: State) -> dict[str, Any]:
             raise ValueError("Answer omitted external evidence IDs")
         _check_bnpb_numbers(answer.text, state, external_ids)
         _check_bmkg_numbers(answer.text, state, external_ids)
+        _check_price_hotspot_numbers(answer.text, state, external_ids)
         output = {
             "answer": answer.text,
             "answer_observation_ids": observation_ids,

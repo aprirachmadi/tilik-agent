@@ -9,6 +9,8 @@ const SOURCE_OPTIONS: { value: SourceChoice; label: string }[] = [
   { value: "bps", label: "BPS" },
   { value: "bnpb", label: "BNPB" },
   { value: "bmkg", label: "BMKG" },
+  { value: "bapanas", label: "Bapanas" },
+  { value: "sipongi", label: "SiPongi" },
 ];
 
 type ComposerProps = {

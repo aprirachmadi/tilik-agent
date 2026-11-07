@@ -31,7 +31,7 @@ export function EmptyState({ composer, onPick, onOpenExample }: EmptyStateProps)
         {sourceCatalog.map((source, index) => (
           <div
             key={source.id}
-            className={`flex flex-col py-6 sm:px-6 ${index > 0 ? "border-t border-line sm:border-t-0 sm:border-l" : "sm:pl-0"}`}
+            className={`flex flex-col py-6 sm:px-6 ${index > 0 ? "border-t border-line" : ""} ${index < 3 ? "sm:border-t-0" : ""} ${index % 3 ? "sm:border-l sm:border-line" : "sm:pl-0"}`}
           >
             <p className="eyebrow text-ink">{source.id}</p>
             <p className="mt-2 text-sm font-medium text-ink">{source.name}</p>

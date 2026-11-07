@@ -88,7 +88,7 @@ def _visitor(request: Request) -> str:
 class QuestionRequest(BaseModel):
     question: str = Field(min_length=1)
     conversation_id: str | None = None
-    sources: list[Literal["bps", "bnpb", "bmkg"]] | None = None
+    sources: list[Literal["bps", "bnpb", "bmkg", "bapanas", "sipongi"]] | None = None
 
 
 class QuestionResponse(BaseModel):
@@ -206,24 +206,26 @@ def _save_turn(conversation_id: str, question: str, result: QuestionResult) -> Q
         result.sources = _with_tablesource(session, result.sources)
         external = {item["id"]: item for item in result.external_evidence if "data" in item}
         for source in result.sources:
-            if source.get("kind") != "external" or source.get("provider") != "BMKG":
+            # Live feeds change; keep the payload a saved answer cited. Synced tables are already versioned.
+            provider = source.get("provider")
+            if source.get("kind") != "external" or provider not in {"BMKG", "Bapanas", "SiPongi"}:
                 continue
             item = external.get(source.get("evidence_id"))
-            if item is None:
+            if item is None or not item.get("snapshot_payload"):
                 continue
             content = {"normalized": item["data"], "raw": item.get("snapshot_payload")}
             serialized = json.dumps(content, sort_keys=True, ensure_ascii=False, default=str)
             if len(serialized) > 2_000_000:
-                raise ValueError("Cited BMKG evidence exceeds snapshot size limit")
+                raise ValueError(f"Cited {provider} evidence exceeds snapshot size limit")
             digest = hashlib.sha256(serialized.encode()).hexdigest()
             snapshot = session.scalar(
                 select(ExternalSourceSnapshot).where(
-                    ExternalSourceSnapshot.provider == "BMKG", ExternalSourceSnapshot.content_sha256 == digest
+                    ExternalSourceSnapshot.provider == provider, ExternalSourceSnapshot.content_sha256 == digest
                 )
             )
             if snapshot is None:
                 snapshot = ExternalSourceSnapshot(
-                    provider="BMKG", source_url=str(source.get("url") or ""),
+                    provider=provider, source_url=str(source.get("url") or ""),
                     content_sha256=digest, content=content,
                 )
                 session.add(snapshot)

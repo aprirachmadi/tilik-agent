@@ -1,0 +1,1 @@
+"""SiPongi satellite hotspot connector."""

@@ -50,6 +50,8 @@ def _trusted_source_url(provider: str, url: Any) -> str | None:
     allowed = {
         "BNPB": {"data.bnpb.go.id"},
         "BMKG": {"api.bmkg.go.id", "data.bmkg.go.id", "www.bmkg.go.id"},
+        "Bapanas": {"panelharga.badanpangan.go.id"},
+        "SiPongi": {"sipongi.gakkum.kehutanan.go.id"},
     }
     return url if parsed.scheme == "https" and parsed.hostname in allowed.get(provider, set()) else None
 
@@ -184,7 +186,7 @@ def cited_sources(state: State) -> list[dict[str, Any]]:
         rows = data.get("rows") or []
         years = [row["year"] for row in rows if isinstance(row.get("year"), int)]
         warnings = data.get("warnings") or []
-        data_time = data.get("analysis_date")
+        data_time = data.get("data_time") or data.get("analysis_date")
         if years:
             data_time = str(min(years)) if min(years) == max(years) else f"{min(years)}–{max(years)}"
         elif data.get("events"):

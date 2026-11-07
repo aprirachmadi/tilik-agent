@@ -1,7 +1,7 @@
 [project]
 name = "tilik-agent"
 version = "0.1.0"
-description = "Indonesian data analyst with BPS, BNPB, and BMKG source connectors"
+description = "Indonesian data analyst with BPS, BNPB, BMKG, Bapanas, and SiPongi source connectors"
 authors = [{ name = "Tilik Agent Contributors" }]
 license = "LicenseRef-Proprietary"
 requires-python = ">=3.11,<3.14"

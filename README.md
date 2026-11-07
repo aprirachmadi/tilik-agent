@@ -2,7 +2,7 @@
 
 # Tilik
 
-**Answers Indonesian data questions using BPS, BNPB, and BMKG source connectors.**
+**Answers Indonesian data questions using BPS, BNPB, BMKG, Bapanas, and SiPongi source connectors.**
 
 ![Python](https://img.shields.io/badge/Python-%E2%89%A53.11-blue?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?logo=fastapi&logoColor=white)
@@ -14,7 +14,7 @@
 
 </div>
 
-Tilik routes each question to its own BPS, BNPB, or BMKG MCP server. BPS reads published observations and SP2020 passages, BNPB reads synchronized disaster aggregates, and BMKG reads official live feeds. The answer includes cited source links and retrieval times. BPS comparisons can also produce a chart.
+Tilik routes each question to its own BPS, BNPB, BMKG, Bapanas, or SiPongi MCP server. BPS reads published observations and SP2020 passages, BNPB reads synchronized disaster aggregates, and BMKG reads official live feeds. Bapanas reads consumer food prices and SiPongi reads satellite hotspot counts, each both live and from a daily monthly sync. The answer includes cited source links and retrieval times. BPS comparisons can also produce a chart.
 
 ## Contents
 
@@ -70,16 +70,26 @@ flowchart TD
     C --> B[BPS MCP: observations and SP2020]
     C --> N[BNPB MCP: synchronized aggregates]
     C --> M[BMKG MCP: live official feeds]
+    C --> F[Bapanas MCP: live and monthly food prices]
+    C --> H[SiPongi MCP: live and monthly hotspots]
     B --> V[Validate evidence and provenance]
     N --> V
     M --> V
+    F --> V
+    H --> V
     V --> A[Calculate supported comparisons]
     A --> W[Write grounded answer]
-    W --> P[Save citations and BMKG evidence snapshot]
+    W --> P[Save citations and live evidence snapshots]
     P --> U[Answer, source chips, and optional chart]
     CKAN[BNPB CKAN DataStore] --> SYNC[Daily idempotent sync]
     SYNC --> N
     LIVE[BMKG official JSON and CAP] --> M
+    PANEL[Bapanas Panel Harga routes] --> F
+    PANEL --> MSYNC[Daily monthly sync]
+    SPG[SiPongi hotspot service] --> H
+    SPG --> MSYNC
+    MSYNC --> F
+    MSYNC --> H
 ```
 
 Tilik starts the source servers over MCP stdio in local development. Docker Compose
@@ -95,9 +105,23 @@ are available for Kemayoran or an explicit validated `adm4` code. Alerts are
 filtered by their CAP expiry time. The first BPS+BNPB comparison is limited to
 same-year 2024 province values with a confirmed BPS province code.
 
+Bapanas and SiPongi have no documented public API. Tilik calls the same routes
+their public pages call, without API keys, and validates every response shape.
+Bapanas covers consumer prices: the latest daily price, and monthly province
+averages from June 2021. SiPongi covers hotspot counts: the last 12, 24, or 48
+hours, and monthly counts by province and district from January 2015. A hotspot
+is a satellite heat detection, not a confirmed fire. Satellites change over the
+years, so multi-year hotspot series use NASA-MODIS only. Both sources number the
+Papua provinces differently from BPS; Tilik maps province names to BPS codes.
+The [connector plan](docs/pangan-hotspot-connector-plan.md) records the source
+findings.
+
 For a local Poetry run, apply `poetry run alembic upgrade head` and then run
-`poetry run tilik ingest bnpb` once. Docker Compose runs the migration and
-starts a daily idempotent BNPB refresh automatically. BMKG is fetched live
+`poetry run tilik ingest bnpb` once. Run `poetry run tilik ingest bapanas` and
+`poetry run tilik ingest sipongi` the same way; their first run takes about an
+hour and ten minutes respectively, and later runs fetch only unfinished months.
+Docker Compose runs the migration and starts a daily idempotent BNPB, Bapanas,
+and SiPongi refresh automatically. BMKG is fetched live
 and needs no import. The
 [implementation plan](CONNECTOR_MIGRATION_PLAN.md) records the file map and
 source limitations.
@@ -115,7 +139,7 @@ set +a
 ```
 
 The smoke script runs one real `run_question` generation through each of the
-BPS, BNPB, and BMKG MCP connectors. It does not call benchmark judges. It
+BPS, BNPB, BMKG, Bapanas, and SiPongi MCP connectors. It does not call benchmark judges. It
 expects a migrated Postgres with BNPB facts and the BPS province density table.
 For a fresh database using the settings in `.env.local` (Postgres on `127.0.0.1:5431`):
 
@@ -123,6 +147,8 @@ For a fresh database using the settings in `.env.local` (Postgres on `127.0.0.1:
 docker compose --env-file .env.local -f docker-compose.yml -f docker-compose.dev.yml up -d postgres
 poetry run alembic upgrade head
 poetry run tilik ingest bnpb
+poetry run tilik ingest bapanas
+poetry run tilik ingest sipongi
 poetry run tilik ingest catalog
 poetry run tilik ingest table --id 'MTQxIzI='
 poetry run python examples/connector_e2e.py
@@ -137,7 +163,7 @@ own tables ingested first. The database keeps its data in the
 ## Ask a question
 
 `POST /questions` with a JSON body. Omit `sources` for automatic routing, or
-pass one or two of `bps`, `bnpb`, and `bmkg` to limit the connectors.
+pass one or two of `bps`, `bnpb`, `bmkg`, `bapanas`, and `sipongi` to limit the connectors.
 
 ```json
 { "question": "Provinsi mana saja yang memiliki tiga TPT tertinggi pada Agustus 2025?" }
@@ -145,7 +171,9 @@ pass one or two of `bps`, `bnpb`, and `bmkg` to limit the connectors.
 
 For example, `{"question": "Berapa kejadian banjir nasional pada 2024?", "sources": ["bnpb"]}`
 queries BNPB. `{"question": "Gempa terbaru menurut BMKG?", "sources": ["bmkg"]}`
-queries BMKG's live feed.
+queries BMKG's live feed. `{"question": "Harga cabai rawit hari ini?", "sources": ["bapanas"]}`
+queries Bapanas, and `{"question": "Titik panas 24 jam terakhir?", "sources": ["sipongi"]}`
+queries SiPongi.
 
 ```bash
 curl -s -X POST http://127.0.0.1:4321/questions \
@@ -197,16 +225,16 @@ These variables override the file when they are set:
 | `RETRIEVAL_COLLECTION` | `retrieval.collection`. `SP2020_COLLECTION` remains accepted for existing environments. |
 | `PGVECTOR_CONNECTION` | Optional pgvector URL. When unset, the app uses the same URL as the observation database. |
 | `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` | Observation database used by SQL lookup. The password is required in `.env`. |
-| `TILIK_BPS_MCP_URL`, `TILIK_BNPB_MCP_URL`, `TILIK_BMKG_MCP_URL` | Optional internal Streamable HTTP server URLs. Without them, Tilik starts local stdio servers. |
+| `TILIK_BPS_MCP_URL`, `TILIK_BNPB_MCP_URL`, `TILIK_BMKG_MCP_URL`, `TILIK_BAPANAS_MCP_URL`, `TILIK_SIPONGI_MCP_URL` | Optional internal Streamable HTTP server URLs. Without them, Tilik starts local stdio servers. |
 
 Secrets stay in `.env`. The yaml file only names the API-key variable.
 
 ## Benchmark
 
 For manual connector acceptance, use the source and limitation cases in
-`src/tilik_agent/evals/datasets/connector_questions.json`. BMKG values change
-live, so its cases check source choice, freshness, and wording rather than fixed
-numbers.
+`src/tilik_agent/evals/datasets/connector_questions.json`. BMKG, Bapanas, and
+SiPongi values change live, so their cases check source choice, freshness, and
+wording rather than fixed numbers.
 
 `poetry run tilik benchmark` runs the judges on the whole question file. It answers each question in `src/tilik_agent/evals/datasets/demografi_sosial_questions.json` through the same `run_question` path as the API, then scores the metrics whose `enabled` flag is true under `evals.metrics`. It prints each question as it starts. A Langfuse trace for that question is sent when the agent finishes answering, before the judges run. `POST /questions` and the notebook trace the question and do not call the judges.
 

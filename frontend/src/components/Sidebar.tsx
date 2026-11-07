@@ -166,7 +166,7 @@ export function Sidebar({
         </nav>
 
         <p className="border-t border-line px-4 py-3 font-mono text-[0.6875rem] leading-4 text-ink-muted">
-          Sumber: BPS · BNPB · BMKG
+          Sumber: BPS · BNPB · BMKG · Bapanas · SiPongi
         </p>
       </aside>
     </>

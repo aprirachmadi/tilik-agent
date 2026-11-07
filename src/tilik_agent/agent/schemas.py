@@ -18,7 +18,7 @@ class RequestIntent(BaseModel):
 
     question: str = Field(min_length=1)
     source_route: Literal["context", "data", "both", "direct"]
-    connectors: list[Literal["bps", "bnpb", "bmkg"]] = Field(default_factory=lambda: ["bps"])
+    connectors: list[Literal["bps", "bnpb", "bmkg", "bapanas", "sipongi"]] = Field(default_factory=lambda: ["bps"])
     indicator: str | None = None
     analysis_operation: Literal["correlation", "ols", "dispersion", "convergence", "paired_compare"] | None = None
     requested_chart: bool = False

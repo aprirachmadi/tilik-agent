@@ -20,16 +20,21 @@ from tilik_agent.agent.tracing import bind_trace_context
 
 def interpret_request(state: State) -> dict[str, Any]:
     original = state.get("original_question") or state["question"]
-    allowed = state.get("allowed_connectors") or ["bps", "bnpb", "bmkg"]
+    allowed = state.get("allowed_connectors") or ["bps", "bnpb", "bmkg", "bapanas", "sipongi"]
     prompt = f"""Interpret the latest question for Tilik, an Indonesian data analyst.
 Return RequestIntent, not a sequence of work steps. The graph owns execution.
 Choose 1 or 2 connectors from {allowed}. BPS has statistical tables and SP2020
 publication passages. BNPB has 2010-2024 disaster counts by province/district
 for all disaster types or national series by disaster type. BMKG has live village
-forecasts, earthquakes and active weather alerts. For BPS use source_route=data
+forecasts, earthquakes and active weather alerts. Bapanas has consumer food
+prices: the latest daily price and monthly averages from 2021-06, national or by
+province. SiPongi has satellite hotspot counts: the last 12/24/48 hours and
+monthly counts from 2015-01, national, by province, or by district; a hotspot
+is not a confirmed fire. For BPS use source_route=data
 for tables, context for publication, both for both. For other sources use data.
 Use direct only when no lookup is needed. Never interpret a historical BNPB
-count as a current BMKG forecast or a causal relationship.
+count as a current BMKG forecast or a causal relationship. Bapanas and SiPongi
+never use analysis_operation.
 Statistical analysis_operation applies to BPS province tables and to BNPB
 national series by disaster type across years. A BPS+BNPB comparison may place
 validated 2024 province values side by side, but does not run correlation or

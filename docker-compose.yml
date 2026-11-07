@@ -94,6 +94,70 @@ services:
       migrate:
         condition: service_completed_successfully
 
+  bapanas-mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["python", "-m", "tilik_agent.connectors.bapanas.mcp"]
+    restart: unless-stopped
+    environment:
+      TILIK_MCP_TRANSPORT: streamable-http
+      TILIK_MCP_HOST: 0.0.0.0
+      POSTGRES_HOST: postgres
+      POSTGRES_USER: ${POSTGRES_USER:-tilik}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-tilik}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  sipongi-mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["python", "-m", "tilik_agent.connectors.sipongi.mcp"]
+    restart: unless-stopped
+    environment:
+      TILIK_MCP_TRANSPORT: streamable-http
+      TILIK_MCP_HOST: 0.0.0.0
+      POSTGRES_HOST: postgres
+      POSTGRES_USER: ${POSTGRES_USER:-tilik}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-tilik}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  bapanas-sync:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["sh", "-c", "while true; do if tilik ingest bapanas; then sleep 86400; else sleep 3600; fi; done"]
+    restart: unless-stopped
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_USER: ${POSTGRES_USER:-tilik}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-tilik}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  sipongi-sync:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["sh", "-c", "while true; do if tilik ingest sipongi; then sleep 86400; else sleep 3600; fi; done"]
+    restart: unless-stopped
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_USER: ${POSTGRES_USER:-tilik}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-tilik}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
   api:
     build:
       context: .
@@ -118,6 +182,8 @@ services:
       TILIK_BPS_MCP_URL: http://bps-mcp:8000/mcp
       TILIK_BNPB_MCP_URL: http://bnpb-mcp:8000/mcp
       TILIK_BMKG_MCP_URL: http://bmkg-mcp:8000/mcp
+      TILIK_BAPANAS_MCP_URL: http://bapanas-mcp:8000/mcp
+      TILIK_SIPONGI_MCP_URL: http://sipongi-mcp:8000/mcp
       HF_HOME: /cache/huggingface
     volumes:
       - hf_cache:/cache/huggingface
@@ -131,6 +197,10 @@ services:
       bnpb-mcp:
         condition: service_started
       bmkg-mcp:
+        condition: service_started
+      bapanas-mcp:
+        condition: service_started
+      sipongi-mcp:
         condition: service_started
     healthcheck:
       test:
