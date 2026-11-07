@@ -63,24 +63,16 @@ Open [http://localhost:5173](http://localhost:5173). The dev server proxies `/ap
 
 ## Pipeline
 
-Each question runs through this LangGraph graph (`src/tilik_agent/agent/graph.py`). Only the 1-2 sources the
-planner selects are fetched; every source is fetched the same way:
+Each question runs through this LangGraph graph (`src/tilik_agent/agent/graph.py`). The chart shows the
+source steps as one, because every source is fetched the same way:
 
 ```mermaid
 flowchart TD
     Q[Question and recent history] --> IR["interpret_request<br/>LLM picks 1-2 sources, the evidence type, and any analysis"]
     IR --> RS{route_sources}
     RS -->|no lookup| WA
-    RS -->|lookup| S1[BPS]
-    RS -->|lookup| S2[BNPB]
-    RS -->|lookup| S3[BMKG]
-    RS -->|lookup| S4[Bapanas]
-    RS -->|lookup| S5[SiPongi]
-    S1 --> RA{analysis requested?}
-    S2 --> RA
-    S3 --> RA
-    S4 --> RA
-    S5 --> RA
+    RS -->|lookup| FS["Fetch evidence from the selected sources<br/>BPS · BNPB · BMKG · Bapanas · SiPongi"]
+    FS --> RA{analysis requested?}
     RA -->|yes| AD[analyze_data: trend or correlation]
     RA -->|no| WA
     AD --> WA
